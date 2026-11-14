@@ -1,0 +1,132 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "app.name" . }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.replicas }}
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels:
+      {{- include "app.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "app.selector" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "app.name" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      {{- if .Values.appdynamics.enabled }}
+      initContainers:
+        - name: install-appdynamics
+          image: {{ required "appdynamics.agentImage requis" .Values.appdynamics.agentImage | quote }}
+          imagePullPolicy: IfNotPresent
+          command: [/bin/sh, -ec]
+          args:
+            - 'cp -R "$AGENT_SOURCE_DIR"/. /agent/; test -r /agent/javaagent.jar; chmod -R u+rwX /agent'
+          env:
+            - name: AGENT_SOURCE_DIR
+              value: {{ .Values.appdynamics.agentSourceDir | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            {{- toYaml .Values.appdynamics.resources | nindent 12 }}
+          volumeMounts:
+            - {name: appdynamics, mountPath: /agent}
+      {{- end }}
+      containers:
+        - name: springboot
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - {name: http, containerPort: {{ .Values.port }}, protocol: TCP}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: SERVER_PORT
+              value: {{ .Values.port | quote }}
+            - name: JAVA_TOOL_OPTIONS
+              value: {{ printf "%s %s" .Values.javaToolOptions (ternary "-javaagent:/opt/appdynamics/javaagent.jar" "" .Values.appdynamics.enabled) | trim | quote }}
+            {{- if .Values.appdynamics.enabled }}
+            - name: APPDYNAMICS_CONTROLLER_HOST_NAME
+              value: {{ required "appdynamics.controller.host requis" .Values.appdynamics.controller.host | quote }}
+            - name: APPDYNAMICS_CONTROLLER_PORT
+              value: {{ .Values.appdynamics.controller.port | quote }}
+            - name: APPDYNAMICS_CONTROLLER_SSL_ENABLED
+              value: {{ .Values.appdynamics.controller.ssl | quote }}
+            - name: APPDYNAMICS_AGENT_APPLICATION_NAME
+              value: {{ required "appdynamics.applicationName requis" .Values.appdynamics.applicationName | quote }}
+            - name: APPDYNAMICS_AGENT_TIER_NAME
+              value: {{ required "appdynamics.tierName requis" .Values.appdynamics.tierName | quote }}
+            - name: APPDYNAMICS_AGENT_ACCOUNT_NAME
+              value: {{ required "appdynamics.accountName requis" .Values.appdynamics.accountName | quote }}
+            - name: APPDYNAMICS_AGENT_ACCOUNT_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "appdynamics.accessKeySecret.name requis" .Values.appdynamics.accessKeySecret.name }}
+                  key: {{ .Values.appdynamics.accessKeySecret.key }}
+            - name: APPDYNAMICS_AGENT_NODE_NAME
+              valueFrom:
+                fieldRef: {fieldPath: metadata.name}
+            {{- end }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          startupProbe:
+            {{- toYaml .Values.startupProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            {{- if .Values.appdynamics.enabled }}
+            - {name: appdynamics, mountPath: /opt/appdynamics}
+            {{- end }}
+            {{- range .Values.certificates }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath | quote }}
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.appdynamics.enabled }}
+        - name: appdynamics
+          emptyDir: {}
+        {{- end }}
+        {{- range .Values.certificates }}
+        - name: {{ .name }}
+          secret:
+            secretName: {{ .secretName }}
+            defaultMode: 0444
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

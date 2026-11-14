@@ -1,0 +1,28 @@
+appName: monapp
+fullnameOverride: ''
+imagePullSecrets: []
+image: registry.access.redhat.com/ubi9/httpd-24:latest
+imagePullPolicy: IfNotPresent
+replicas: 2
+port: 8080
+proxyTimeout: 60
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+clusterDomain: cluster.local
+backend:
+  serviceName: monapp-int-springboot
+  namespace: monapp-back-int
+  port: 8080
+route:
+  enabled: true
+  host: monapp-int.apps.example.com
+networkPolicy:
+  enabled: true
+  routerNamespaceSelector:
+    matchLabels:
+      network.openshift.io/policy-group: ingress

@@ -1,24 +1,24 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: monapp-rec
+  name: monapp-rec-springboot
   namespace: openshift-gitops
 spec:
-  project: default # Ou votre AppProject existant autorisant les DEUX namespaces.
+  project: default
   source:
     repoURL: https://github.com/miservers/generic-chart.git
     targetRevision: main
-    path: charts/spring-httpd
+    path: charts/springboot
     helm:
-      releaseName: monapp-rec
+      releaseName: monapp-rec-springboot
       valueFiles:
-        - ../../environments/monapp/rec.yaml
+      - ../../environments/monapp/rec/springboot.yaml
   destination:
     server: https://kubernetes.default.svc
-    namespace: monapp-front-rec
+    namespace: monapp-back-rec
   syncPolicy:
     syncOptions:
-      - FailOnSharedResource=true
+    - FailOnSharedResource=true
     automated:
       prune: true
       selfHeal: true

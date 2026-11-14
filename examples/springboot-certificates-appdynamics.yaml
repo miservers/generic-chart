@@ -1,0 +1,26 @@
+# Surcharge facultative à ajouter APRÈS le fichier d'environnement Spring Boot.
+# Secrets préexistants dans le namespace backend ; aucune clé secrète dans Git.
+certificates:
+  - name: java-truststore
+    secretName: monapp-truststore
+    mountPath: /etc/java-truststore
+# Truststore JKS de certificats publics uniquement. Inclure toutes les CA nécessaires.
+# Pas de mot de passe dans JAVA_TOOL_OPTIONS : la JVM peut afficher cette variable.
+javaToolOptions: >-
+  -Djavax.net.ssl.trustStore=/etc/java-truststore/truststore.jks
+  -Djavax.net.ssl.trustStoreType=JKS
+appdynamics:
+  enabled: true
+  # À remplacer par une image agent approuvée, compatible UID arbitraire et votre JDK.
+  agentImage: registry.example.com/observabilite/appdynamics-java-agent:VERSION-A-REMPLACER
+  agentSourceDir: /opt/appdynamics
+  controller:
+    host: appdynamics.example.com
+    port: 443
+    ssl: true
+  applicationName: MONAPP-INT
+  tierName: springboot
+  accountName: customer1
+  accessKeySecret:
+    name: monapp-appdynamics
+    key: access-key

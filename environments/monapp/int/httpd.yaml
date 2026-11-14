@@ -1,0 +1,8 @@
+appName: monapp
+replicas: 1
+backend:
+  serviceName: monapp-int-springboot
+  namespace: monapp-back-int
+  port: 8080
+route:
+  host: monapp-int.apps.example.com

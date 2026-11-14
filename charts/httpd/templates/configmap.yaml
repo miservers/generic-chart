@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "app.name" . }}-httpd
-  namespace: {{ .Values.namespaces.frontend }}
+  name: {{ include "app.name" . }}
+  namespace: {{ .Release.Namespace }}
 data:
   httpd.conf: |
     ServerRoot "/etc/httpd"
-    Listen {{ .Values.frontend.port }}
+    Listen {{ .Values.port }}
     ServerName {{ .Values.route.host | default "localhost" }}
     PidFile /run/httpd/httpd.pid
     DefaultRuntimeDir /run/httpd
@@ -31,7 +31,7 @@ data:
     </Directory>
     ProxyRequests Off
     ProxyPreserveHost On
-    ProxyTimeout {{ .Values.frontend.proxyTimeout }}
+    ProxyTimeout {{ .Values.proxyTimeout }}
     # Toutes les requêtes passent par la Route HTTPS edge (HTTP redirigé).
     RequestHeader unset Forwarded
     RequestHeader set X-Forwarded-Proto "https"
@@ -43,5 +43,5 @@ data:
     <LocationMatch "^/actuator(?:/|$)">
       Require all denied
     </LocationMatch>
-    ProxyPass "/" "{{ include "app.backendURL" . }}" connectiontimeout=5 timeout={{ .Values.frontend.proxyTimeout }}
-    ProxyPassReverse "/" "{{ include "app.backendURL" . }}"
+    ProxyPass "/" "http://{{ .Values.backend.serviceName }}.{{ .Values.backend.namespace }}.svc.{{ .Values.clusterDomain }}:{{ .Values.backend.port }}/" connectiontimeout=5 timeout={{ .Values.proxyTimeout }}
+    ProxyPassReverse "/" "http://{{ .Values.backend.serviceName }}.{{ .Values.backend.namespace }}.svc.{{ .Values.clusterDomain }}:{{ .Values.backend.port }}/"

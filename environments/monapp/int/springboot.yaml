@@ -1,0 +1,9 @@
+appName: monapp
+replicas: 1
+image: registry.example.com/equipe/monapp:1.0.0
+networkPolicy:
+  frontendNamespace: monapp-front-int
+  frontendPodLabels:
+    app.kubernetes.io/name: monapp
+    app.kubernetes.io/instance: monapp-int-httpd
+    app.kubernetes.io/component: httpd

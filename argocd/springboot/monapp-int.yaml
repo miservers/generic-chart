@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monapp-int-springboot
+  namespace: openshift-gitops
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/miservers/generic-chart.git
+    targetRevision: main
+    path: charts/springboot
+    helm:
+      releaseName: monapp-int-springboot
+      valueFiles:
+      - ../../environments/monapp/int/springboot.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monapp-back-int
+  syncPolicy:
+    syncOptions:
+    - FailOnSharedResource=true
+    automated:
+      prune: true
+      selfHeal: true

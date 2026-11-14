@@ -1,5 +1,0 @@
-apiVersion: v2
-name: spring-httpd
-description: Spring Boot et reverse proxy HTTPD sur deux namespaces OpenShift
-type: application
-version: 0.1.0

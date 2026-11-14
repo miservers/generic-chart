@@ -1,0 +1,76 @@
+appName: monapp
+fullnameOverride: ''
+imagePullSecrets: []
+image: registry.example.com/equipe/monapp:1.0.0
+imagePullPolicy: IfNotPresent
+replicas: 2
+port: 8080
+servicePort: 8080
+env:
+- name: SERVER_FORWARD_HEADERS_STRATEGY
+  value: framework
+- name: MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED
+  value: 'true'
+- name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
+  value: health
+envFrom: []
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: '1'
+    memory: 1Gi
+startupProbe:
+  httpGet:
+    path: /actuator/health/liveness
+    port: http
+  periodSeconds: 5
+  timeoutSeconds: 2
+  failureThreshold: 60
+readinessProbe:
+  httpGet:
+    path: /actuator/health/readiness
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 2
+livenessProbe:
+  httpGet:
+    path: /actuator/health/liveness
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+javaToolOptions: ''
+podAnnotations: {}
+certificates: []
+extraVolumes: []
+extraVolumeMounts: []
+appdynamics:
+  enabled: false
+  agentImage: ''
+  agentSourceDir: /opt/appdynamics
+  controller:
+    host: ''
+    port: 443
+    ssl: true
+  applicationName: ''
+  tierName: ''
+  accountName: ''
+  accessKeySecret:
+    name: ''
+    key: access-key
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+networkPolicy:
+  enabled: true
+  frontendNamespace: monapp-front-int
+  frontendPodLabels:
+    app.kubernetes.io/name: monapp
+    app.kubernetes.io/instance: monapp-int-httpd
+    app.kubernetes.io/component: httpd

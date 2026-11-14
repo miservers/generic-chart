@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "appName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    },
+    "fullnameOverride": {
+      "type": "string",
+      "maxLength": 63,
+      "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    },
+    "image": {
+      "type": "string",
+      "minLength": 1
+    },
+    "replicas": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1024,
+      "maximum": 65535
+    },
+    "javaToolOptions": {
+      "type": "string"
+    },
+    "certificates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "secretName",
+          "mountPath"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 63,
+            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+          },
+          "secretName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 63,
+            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+          },
+          "mountPath": {
+            "type": "string",
+            "pattern": "^/[^\\s]+$"
+          }
+        }
+      }
+    },
+    "servicePort": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "appdynamics": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "controller": {
+          "type": "object",
+          "properties": {
+            "ssl": {
+              "type": "boolean"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          }
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "frontendNamespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "frontendPodLabels": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

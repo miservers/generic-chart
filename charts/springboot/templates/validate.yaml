@@ -1,0 +1,16 @@
+{{- $names := dict "tmp" true "appdynamics" true -}}
+{{- range .Values.certificates -}}
+{{- if hasKey $names .name -}}{{- fail (printf "Volume réservé ou dupliqué: %s" .name) -}}{{- end -}}
+{{- $_ := set $names .name true -}}
+{{- end -}}
+{{- range .Values.extraVolumes -}}
+{{- if hasKey $names .name -}}{{- fail (printf "Volume réservé ou dupliqué: %s" .name) -}}{{- end -}}
+{{- $_ := set $names .name true -}}
+{{- end -}}
+{{- $envNames := dict "JAVA_TOOL_OPTIONS" true "SERVER_PORT" true -}}
+{{- range .Values.env -}}
+{{- if or (hasKey $envNames .name) (and $.Values.appdynamics.enabled (hasPrefix "APPDYNAMICS_" .name)) -}}
+{{- fail (printf "Variable réservée ou dupliquée: %s; utiliser les paramètres du chart" .name) -}}
+{{- end -}}
+{{- $_ := set $envNames .name true -}}
+{{- end -}}
