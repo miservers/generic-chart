@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monapp-int
+  namespace: openshift-gitops
+spec:
+  project: default # Ou votre AppProject existant autorisant les DEUX namespaces.
+  source:
+    repoURL: https://github.com/miservers/generic-chart.git
+    targetRevision: main
+    path: charts/spring-httpd
+    helm:
+      releaseName: monapp-int
+      valueFiles:
+        - ../../environments/monapp/int.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monapp-front-int
+  syncPolicy:
+    syncOptions:
+      - FailOnSharedResource=true
+    automated:
+      prune: true
+      selfHeal: true

@@ -1,0 +1,53 @@
+# Une release par application métier ET environnement.
+appName: monapp
+clusterDomain: cluster.local
+namespaces:
+  frontend: monapp-front-int
+  backend: monapp-back-int
+imagePullSecrets: [] # Secrets existants dans CHACUN des deux namespaces
+frontend:
+  image: registry.access.redhat.com/ubi9/httpd-24:latest
+  imagePullPolicy: IfNotPresent
+  replicas: 2
+  port: 8080
+  proxyTimeout: 60
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+backend:
+  image: registry.example.com/equipe/monapp:1.0.0
+  imagePullPolicy: IfNotPresent
+  replicas: 2
+  port: 8080
+  servicePort: 8080
+  env:
+    - {name: SERVER_PORT, value: '8080'}
+    - {name: SERVER_FORWARD_HEADERS_STRATEGY, value: framework}
+    - {name: MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED, value: 'true'}
+    - {name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE, value: health}
+  envFrom: [] # Exemple: [{secretRef: {name: monapp-secrets}}]
+  resources:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {cpu: '1', memory: 1Gi}
+  startupProbe:
+    httpGet: {path: /actuator/health/liveness, port: http}
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 60
+  readinessProbe:
+    httpGet: {path: /actuator/health/readiness, port: http}
+    periodSeconds: 10
+    timeoutSeconds: 2
+  livenessProbe:
+    httpGet: {path: /actuator/health/liveness, port: http}
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+route:
+  enabled: true
+  host: monapp-int.apps.example.com
+networkPolicy:
+  enabled: true
+  routerNamespaceSelector:
+    matchLabels:
+      network.openshift.io/policy-group: ingress

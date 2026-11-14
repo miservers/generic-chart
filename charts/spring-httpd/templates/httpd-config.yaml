@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "app.name" . }}-httpd
+  namespace: {{ .Values.namespaces.frontend }}
+data:
+  httpd.conf: |
+    ServerRoot "/etc/httpd"
+    Listen {{ .Values.frontend.port }}
+    ServerName {{ .Values.route.host | default "localhost" }}
+    PidFile /run/httpd/httpd.pid
+    DefaultRuntimeDir /run/httpd
+    LoadModule mpm_event_module modules/mod_mpm_event.so
+    LoadModule unixd_module modules/mod_unixd.so
+    LoadModule authz_core_module modules/mod_authz_core.so
+    LoadModule log_config_module modules/mod_log_config.so
+    LoadModule proxy_module modules/mod_proxy.so
+    LoadModule proxy_http_module modules/mod_proxy_http.so
+    LoadModule headers_module modules/mod_headers.so
+    User apache
+    Group apache
+    ServerTokens Prod
+    ServerSignature Off
+    TraceEnable Off
+    ErrorLog /proc/self/fd/2
+    LogFormat "%h %l %u %t \"%r\" %>s %b" main
+    CustomLog /proc/self/fd/1 main
+    LogLevel warn
+    <Directory />
+      Require all denied
+    </Directory>
+    ProxyRequests Off
+    ProxyPreserveHost On
+    ProxyTimeout {{ .Values.frontend.proxyTimeout }}
+    # Toutes les requêtes passent par la Route HTTPS edge (HTTP redirigé).
+    RequestHeader unset Forwarded
+    RequestHeader set X-Forwarded-Proto "https"
+    RequestHeader set X-Forwarded-Port "443"
+    <Location "/">
+      Require all granted
+    </Location>
+    # Ne pas exposer les endpoints techniques via le frontal.
+    <LocationMatch "^/actuator(?:/|$)">
+      Require all denied
+    </LocationMatch>
+    ProxyPass "/" "{{ include "app.backendURL" . }}" connectiontimeout=5 timeout={{ .Values.frontend.proxyTimeout }}
+    ProxyPassReverse "/" "{{ include "app.backendURL" . }}"

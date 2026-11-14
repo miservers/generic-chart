@@ -1,0 +1,3 @@
+{{- if eq .Values.namespaces.frontend .Values.namespaces.backend -}}
+{{- fail "namespaces.frontend et namespaces.backend doivent être différents" -}}
+{{- end -}}
