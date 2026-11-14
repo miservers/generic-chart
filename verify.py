@@ -11,11 +11,11 @@ def render(comp,env='int',extra=None,ok=True):
  assert (r.returncode==0)==ok,r.stderr
  return [d for d in yaml.safe_load_all(r.stdout) if d] if ok else []
 
-def one(docs,kind):return next(d for d in docs if d['kind']==kind)
+def one(docs,kind):return next(d for d in docs if (d['kind']==kind or (kind=='Deployment' and d['kind']=='StatefulSet')) and not (kind=='Service' and d['spec'].get('clusterIP')=='None'))
 for env in ['int','rec','prod']:
  front=render('httpd',env);back=render('springboot',env)
  for comp,docs in [('httpd',front),('springboot',back)]:
-  assert len(docs)==(6 if comp=='httpd' else 4)
+  assert len(docs)==(6 if comp=='httpd' else 5)
   expected=f'monapp-{"front" if comp=="httpd" else "back"}-{env}'
   assert {d['metadata']['namespace'] for d in docs}=={expected}
   dep=one(docs,'Deployment');svc=one(docs,'Service')
@@ -28,7 +28,18 @@ for env in ['int','rec','prod']:
    assert (root/f'charts/{comp}'/f).resolve().is_file()
  conf=one(front,'ConfigMap')['data']['httpd.conf']
  svc=one(back,'Service')
- assert f'http://{svc["metadata"]["name"]}.{svc["metadata"]["namespace"]}.svc.cluster.local:{svc["spec"]["ports"][0]["port"]}/' in conf
+ stateful=one(back,'Deployment')
+ assert stateful['kind']=='StatefulSet' and stateful['spec']['replicas']==2
+ assert one(front,'Deployment')['spec']['replicas']==2
+ headless=next(d for d in back if d['kind']=='Service' and d['spec'].get('clusterIP')=='None')
+ assert stateful['spec']['serviceName']==headless['metadata']['name']
+ assert headless['spec']['publishNotReadyAddresses'] is True
+ for ordinal in (0,1):
+  assert f'http://{stateful["metadata"]["name"]}-{ordinal}.{headless["metadata"]["name"]}.{svc["metadata"]["namespace"]}.svc.cluster.local:8080" route=pod{ordinal}' in conf
+ assert 'nofailover=Off' in conf and 'disablereuse=On' in conf
+ assert 'HttpOnly; Secure; SameSite=Lax' in conf
+ assert 'hcexpr=ready' in conf
+ assert 'volumeClaimTemplates' not in stateful['spec']
  peer=one(back,'NetworkPolicy')['spec']['ingress'][0]['from'][0]
  assert peer['namespaceSelector']['matchLabels']['kubernetes.io/metadata.name']==one(front,'Deployment')['metadata']['namespace']
  assert peer['podSelector']['matchLabels']==one(front,'Deployment')['spec']['template']['metadata']['labels']
@@ -51,3 +62,12 @@ render('springboot',extra={'certificates':[{'name':'tmp','secretName':'x','mount
 render('httpd',extra={'port':80},ok=False)
 assert not any(x['kind'] in ('Route','NetworkPolicy') for x in render('httpd',extra={'route':{'enabled':False},'networkPolicy':{'enabled':False}}))
 print('Certificats + AppDynamics, absence par défaut et validation des erreurs: OK')
+
+plain=render('springboot',extra={'workloadKind':'Deployment'})
+assert one(plain,'Deployment')['kind']=='Deployment'
+assert not any(d['kind']=='Service' and d['spec'].get('clusterIP')=='None' for d in plain)
+plain=render('httpd',extra={'stickySession':{'enabled':False}})
+assert 'balancer://springboot' not in one(plain,'ConfigMap')['data']['httpd.conf']
+render('httpd',extra={'stickySession':{'cookieName':'bad;cookie'}},ok=False)
+render('httpd',extra={'stickySession':{'replicas':1}},ok=False)
+print('Sticky: 2x2 pods, routes individuelles, cookie, healthchecks et mode Deployment OK')

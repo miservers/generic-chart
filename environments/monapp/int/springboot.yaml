@@ -1,5 +1,5 @@
 appName: monapp
-replicas: 1
+replicas: 2
 image: registry.example.com/equipe/monapp:1.0.0
 networkPolicy:
   frontendNamespace: monapp-front-int
@@ -7,3 +7,4 @@ networkPolicy:
     app.kubernetes.io/name: monapp
     app.kubernetes.io/instance: monapp-int-httpd
     app.kubernetes.io/component: httpd
+workloadKind: StatefulSet

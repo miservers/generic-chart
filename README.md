@@ -1,6 +1,6 @@
 # Charts indépendants HTTPD et Spring Boot — OpenShift / Argo CD
 
-Le même dépôt contient **deux charts autonomes**, chacun avec son propre `templates/deployment.yaml` et ses propres valeurs :
+Le même dépôt contient **deux charts autonomes**, chacun avec son propre template de workload et ses propres valeurs :
 
 | Répertoire | Application Argo CD INT | Namespace | Responsabilité |
 |---|---|---|---|
@@ -12,7 +12,7 @@ Il n'y a ni chart parent ni boucle commune pour générer les deux Deployments. 
 ## Organisation et fichiers
 
 - `charts/httpd/templates/deployment.yaml` : Deployment exclusivement HTTPD.
-- `charts/springboot/templates/deployment.yaml` : Deployment exclusivement Spring Boot.
+- `charts/springboot/templates/workload.yaml` : StatefulSet ou Deployment exclusivement Spring Boot.
 - `environments/monapp/int/httpd.yaml` et `springboot.yaml` : paramètres INT, même organisation pour REC et PROD.
 - `argocd/httpd/monapp-int.yaml` et `argocd/springboot/monapp-int.yaml` : deux Applications, même dépôt Git et chemins de charts différents.
 - `examples/springboot-certificates-appdynamics.yaml` : surcharge facultative pour le backend.
@@ -46,7 +46,7 @@ backend:
   port: 8080
 ```
 
-Le proxy est généré vers `http://monapp-int-springboot.monapp-back-int.svc.cluster.local:8080/`. Le domaine du cluster est configurable avec `clusterDomain`. Si le nom du Service change (`fullnameOverride` ou nom de release), mettre à jour cette référence côté HTTPD. Si le port du conteneur change, mettre à jour `port` dans Spring Boot ; le chart produit automatiquement `SERVER_PORT`. Le `backend.port` d'HTTPD doit correspondre au `servicePort` de Spring Boot.
+Sans sticky session, le proxy cible `http://monapp-int-springboot.monapp-back-int.svc.cluster.local:8080/`. Avec la sticky session activée dans les exemples, HTTPD cible individuellement les deux pods par leur DNS stable, comme décrit ci-dessous. Le domaine du cluster est configurable avec `clusterDomain`. Si le nom du Service change (`fullnameOverride` ou nom de release), mettre à jour cette référence côté HTTPD. Si le port du conteneur change, mettre à jour `port` dans Spring Boot ; le chart produit automatiquement `SERVER_PORT`. Le `backend.port` d'HTTPD doit correspondre au `servicePort` de Spring Boot.
 
 Les règles réseau d'entrée sont gérées séparément : HTTPD autorise le routeur, Spring Boot autorise les pods HTTPD sélectionnés par leurs labels ET leur namespace. Adapter `networkPolicy.frontendNamespace` et `networkPolicy.frontendPodLabels` si la release HTTPD change. Les règles sont additives ; une autre NetworkPolicy permissive reste effective. Les sorties ne sont pas filtrées par ces charts. En présence d'un deny egress existant, autoriser DNS, HTTPD vers Spring Boot, puis les flux backend vers DB, RabbitMQ, AppDynamics ou proxy selon les besoins.
 
@@ -117,7 +117,66 @@ La configuration HTTPD est adaptée à UBI `httpd-24` et son exécutable `/usr/s
 
 Les logs HTTPD vont sur stdout/stderr. Les probes HTTPD sont TCP, donc vérifient le port, pas la disponibilité fonctionnelle du backend. Une modification de sa ConfigMap déclenche son rollout via checksum.
 
-Aucune affinité de session Spring Boot n'est mise en place : utiliser des applications stateless ou des sessions partagées lorsque plusieurs réplicas sont utilisés. Un cookie du routeur colle à HTTPD et ne garantit pas le même pod Spring Boot. L'IP cliente via X-Forwarded-For nécessite une chaîne de proxys de confiance.
+Les exemples activent la sticky session vers Spring Boot, sans réplication de session. Un cookie du routeur colle seulement à HTTPD ; le cookie BACKEND_ROUTE (nom par application/environnement dans les exemples) sélectionne le backend sur les deux HTTPD. L'IP cliente via X-Forwarded-For nécessite une chaîne de proxys de confiance.
+
+## Sticky session : 2 HTTPD et 2 Spring Boot
+
+Les exemples INT, REC et PROD déploient **2 réplicas HTTPD et 2 réplicas Spring Boot**. Le cookie de session Java (par exemple JSESSIONID) reste géré par l'application. HTTPD ajoute un cookie séparé, `MONAPP_INT_ROUTE` en INT, qui vaut `.pod0` ou `.pod1` et reste identique quel que soit le frontal HTTPD utilisé.
+
+- Même cookie + backend sain : même pod Spring Boot.
+- Backend indisponible : `nofailover=Off` permet d'en sélectionner un autre et le cookie d'affinité est mis à jour. La session Java en mémoire est perdue ; une reconnexion utilisateur peut être nécessaire.
+- Backend rétabli : le client reste sur le backend de remplacement indiqué par son nouveau cookie.
+- Redémarrage d'un HTTPD : l'autre HTTPD interprète le même cookie avec la même correspondance de routes.
+- Redémarrage très bref du backend avant détection : le même nom de pod peut être retrouvé, mais la session mémoire reste perdue. Le mécanisme ne garantit pas une bascule si la panne n'est pas observée.
+
+Les backends utilisent un **StatefulSet sans PVC** uniquement pour leur identité réseau stable :
+
+- `monapp-int-springboot-0.monapp-int-springboot-headless.monapp-back-int.svc.cluster.local`
+- `monapp-int-springboot-1.monapp-int-springboot-headless.monapp-back-int.svc.cluster.local`
+
+Le Service headless possède `publishNotReadyAddresses: true`, afin que l'adresse DNS existe aussi pendant les transitions de readiness. HTTPD contacte donc les pods directement et réalise ses propres healthchecks GET sur `/actuator/health/readiness` toutes les 5 secondes ; seul un code 2xx est accepté. Le Service ClusterIP classique reste disponible mais n'est pas utilisé par HTTPD en mode sticky. Adapter `stickySession.healthCheckPath` en même temps que les probes Spring Boot si nécessaire, et rendre cette URL accessible sans authentification depuis HTTPD. L'endpoint Actuator reste interdit aux clients externes par HTTPD.
+
+Les connexions aux membres utilisent `disablereuse=On` pour éviter que des connexions/DNS conservés par HTTPD continuent de cibler une ancienne IP. Cela coûte une nouvelle connexion backend par requête et ne supprime pas les délais de cache DNS du cluster. Les délais de connexion, healthchecks et retry influencent la durée de bascule ; ce n'est pas une garantie de zéro erreur. Une requête en vol peut échouer, notamment si le serveur tombe après son envoi. Ne pas rejouer automatiquement un POST non idempotent côté client.
+
+```yaml
+# environments/monapp/int/httpd.yaml
+replicas: 2
+stickySession:
+  enabled: true
+  cookieName: MONAPP_INT_ROUTE
+  statefulSetName: monapp-int-springboot
+  headlessServiceName: monapp-int-springboot-headless
+  replicas: 2
+  podPort: 8080
+
+# environments/monapp/int/springboot.yaml
+replicas: 2
+workloadKind: StatefulSet
+```
+
+Les paramètres `stickySession.replicas`, `statefulSetName`, `headlessServiceName` et `podPort` doivent correspondre au workload backend, à son Service headless et au port du conteneur (pas nécessairement au port du Service ClusterIP). Ne pas activer un HPA backend sans automatiser également la mise à jour de la liste des membres HTTPD. Pour changer le nombre de backends, augmenter d'abord le StatefulSet puis HTTPD ; pour diminuer, retirer d'abord les membres de la configuration HTTPD puis réduire le StatefulSet. Le nom headless est le nom du workload tronqué à 54 caractères, suivi de `-headless`.
+
+Les cookies sont `Secure`, `HttpOnly`, `SameSite=Lax`, chemin `/`, et propres à chaque application/environnement. HTTPS est requis. Pour plusieurs applications sous le même domaine, utiliser des noms de cookies différents. Le choix de SameSite peut demander une adaptation si votre application nécessite un usage cross-site.
+
+Les modules `mod_proxy_balancer`, `mod_slotmem_shm`, `mod_lbmethod_byrequests`, `mod_watchdog` et `mod_proxy_hcheck` sont chargés en mode sticky. Valider leur présence dans l'image HTTPD approuvée avec un test de démarrage. Les logs d'accès incluent `worker=pod0` ou `worker=pod1` pour observer la cible.
+
+### Déploiement existant
+
+Le type de workload change dans les exemples : **Deployment → StatefulSet**. Si la version précédente est déjà déployée, prévoir une fenêtre de maintenance ou une migration parallèle avec un nom ET des sélecteurs distincts. Suspendre auto-sync/self-heal pendant une migration manuelle. Ne pas faire coexister deux contrôleurs ayant les mêmes sélecteurs. Lors d'une migration avec interruption, retirer l'ancien Deployment avant de démarrer le StatefulSet, puis synchroniser HTTPD après disponibilité des backends. Cette modification ne conserve pas les sessions existantes. Aucun changement n'est appliqué au cluster par cette livraison.
+
+Le chart conserve `workloadKind: Deployment` et `stickySession.enabled: false` comme valeurs de base pour les applications qui n'ont pas besoin d'affinité ; les fichiers d'environnement activent explicitement le profil sticky à deux pods.
+
+### Tests
+
+`verify.py` contrôle les deux réplicas, les noms DNS par ordinal, le Service headless, les règles réseau, les cookies et les variantes sans sticky.
+
+`tests/httpd_sticky_smoke.py` démarre deux vrais processus Apache 2.4 et deux backends HTTP simulés, localement. Il vérifie le maintien de l'affinité entre les deux frontaux, la bascule sur readiness 503, le changement de cookie, le retour du backend, une panne TCP et l'arrêt d'un frontal. Exécution :
+
+```sh
+APACHE_BIN=/chemin/vers/httpd APACHE_MODULES=/chemin/vers/modules python3 tests/httpd_sticky_smoke.py
+```
+
+Ce test adapte les chemins/modules locaux et utilise des ports locaux, pas le DNS Kubernetes. Il ne valide ni l'image UBI ni le cluster réel. Sur OpenShift, vérifier d'abord la syntaxe HTTPD et les healthchecks, puis utiliser un navigateur HTTPS ou `curl -c cookies.txt -b cookies.txt https://VOTRE_HOST/` et observer `worker=` dans les logs. Tester la suppression d'un pod uniquement sur un environnement de test ; une recréation très rapide peut ne pas provoquer de bascule observable.
 
 ## Migration de l'ancien chart combiné
 
@@ -145,8 +204,8 @@ Depuis un poste connecté au cluster, valider chaque rendu avec `oc apply --dry-
 
 ```sh
 oc exec -n monapp-front-int deployment/monapp-int-httpd -- /usr/sbin/httpd -t -f /etc/custom-httpd/httpd.conf
-oc rollout status -n monapp-back-int deployment/monapp-int-springboot
-oc logs -n monapp-back-int deployment/monapp-int-springboot -c install-appdynamics
+oc rollout status -n monapp-back-int statefulset/monapp-int-springboot
+oc logs -n monapp-back-int monapp-int-springboot-0 -c install-appdynamics
 ```
 
 Vérifications locales réalisées : lint des deux charts ; rendus INT/REC/PROD ; namespace unique par chart ; correspondance DNS, Service, sélecteurs et règles réseau ; chemins Argo CD ; activation et absence d'AppDynamics ; montage des certificats et références Secret ; rejets des configurations incomplètes ou conflictuelles. Aucun déploiement réel ni démarrage d'agent AppDynamics n'a été effectué ici.
@@ -163,3 +222,8 @@ Vérifications locales réalisées : lint des deux charts ; rendus INT/REC/PROD 
 - [AppDynamics : variables d'environnement](https://docs.appdynamics.com/appd/24.x/25.5/en/application-monitoring/install-app-server-agents/java-agent/install-the-java-agent/use-environment-variables-for-java-agent-settings)
 - [Oracle : JAVA_TOOL_OPTIONS](https://docs.oracle.com/en/java/javase/24/troubleshoot/environment-variables-and-system-properties.html)
 - [Oracle : truststore JSSE](https://docs.oracle.com/en/java/javase/25/security/java-secure-socket-extension-jsse-reference-guide.html)
+
+- [Apache : sticky session par cookie](https://httpd.apache.org/docs/2.4/mod/mod_proxy_balancer.html)
+- [Apache : contrôle actif des backends](https://httpd.apache.org/docs/2.4/mod/mod_proxy_hcheck.html)
+- [Apache : retry, nofailover et disablereuse](https://httpd.apache.org/docs/2.4/mod/mod_proxy.html)
+- [Kubernetes : identité réseau des StatefulSets](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/)

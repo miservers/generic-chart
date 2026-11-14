@@ -17,13 +17,20 @@ data:
     LoadModule proxy_module modules/mod_proxy.so
     LoadModule proxy_http_module modules/mod_proxy_http.so
     LoadModule headers_module modules/mod_headers.so
+    {{- if .Values.stickySession.enabled }}
+    LoadModule slotmem_shm_module modules/mod_slotmem_shm.so
+    LoadModule proxy_balancer_module modules/mod_proxy_balancer.so
+    LoadModule lbmethod_byrequests_module modules/mod_lbmethod_byrequests.so
+    LoadModule watchdog_module modules/mod_watchdog.so
+    LoadModule proxy_hcheck_module modules/mod_proxy_hcheck.so
+    {{- end }}
     User apache
     Group apache
     ServerTokens Prod
     ServerSignature Off
     TraceEnable Off
     ErrorLog /proc/self/fd/2
-    LogFormat "%h %l %u %t \"%r\" %>s %b" main
+    LogFormat "%h %l %u %t \"%r\" %>s %b worker=%{BALANCER_WORKER_ROUTE}e" main
     CustomLog /proc/self/fd/1 main
     LogLevel warn
     <Directory />
@@ -43,5 +50,18 @@ data:
     <LocationMatch "^/actuator(?:/|$)">
       Require all denied
     </LocationMatch>
+    {{- if .Values.stickySession.enabled }}
+    ProxyHCExpr ready {%{REQUEST_STATUS} =~ /^2/}
+    <Proxy "balancer://springboot">
+      {{- range $i := until (int .Values.stickySession.replicas) }}
+      BalancerMember "http://{{ $.Values.stickySession.statefulSetName }}-{{ $i }}.{{ $.Values.stickySession.headlessServiceName }}.{{ $.Values.backend.namespace }}.svc.{{ $.Values.clusterDomain }}:{{ $.Values.stickySession.podPort }}" route=pod{{ $i }} connectiontimeout={{ $.Values.stickySession.connectionTimeout }} timeout={{ $.Values.proxyTimeout }} retry={{ $.Values.stickySession.retrySeconds }} disablereuse=On hcmethod=GET hcuri={{ $.Values.stickySession.healthCheckPath }} hcexpr=ready hcinterval={{ $.Values.stickySession.healthCheckInterval }} hcfails=1 hcpasses=1
+      {{- end }}
+      ProxySet lbmethod=byrequests stickysession={{ .Values.stickySession.cookieName }} nofailover=Off maxattempts={{ sub (int .Values.stickySession.replicas) 1 }} failontimeout=On
+    </Proxy>
+    Header always add Set-Cookie "{{ .Values.stickySession.cookieName }}=.%{BALANCER_WORKER_ROUTE}e; Path=/; HttpOnly; Secure; SameSite=Lax" env=BALANCER_ROUTE_CHANGED
+    ProxyPass "/" "balancer://springboot/"
+    ProxyPassReverse "/" "balancer://springboot/"
+    {{- else }}
     ProxyPass "/" "http://{{ .Values.backend.serviceName }}.{{ .Values.backend.namespace }}.svc.{{ .Values.clusterDomain }}:{{ .Values.backend.port }}/" connectiontimeout=5 timeout={{ .Values.proxyTimeout }}
     ProxyPassReverse "/" "http://{{ .Values.backend.serviceName }}.{{ .Values.backend.namespace }}.svc.{{ .Values.clusterDomain }}:{{ .Values.backend.port }}/"
+    {{- end }}

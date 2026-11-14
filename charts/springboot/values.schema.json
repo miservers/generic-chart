@@ -102,6 +102,13 @@
           }
         }
       }
+    },
+    "workloadKind": {
+      "type": "string",
+      "enum": [
+        "Deployment",
+        "StatefulSet"
+      ]
     }
   }
 }

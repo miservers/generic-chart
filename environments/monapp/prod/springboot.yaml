@@ -7,3 +7,4 @@ networkPolicy:
     app.kubernetes.io/name: monapp
     app.kubernetes.io/instance: monapp-prod-httpd
     app.kubernetes.io/component: httpd
+workloadKind: StatefulSet

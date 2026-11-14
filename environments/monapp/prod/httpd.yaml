@@ -6,3 +6,10 @@ backend:
   port: 8080
 route:
   host: monapp-prod.apps.example.com
+stickySession:
+  enabled: true
+  cookieName: MONAPP_PROD_ROUTE
+  statefulSetName: monapp-prod-springboot
+  headlessServiceName: monapp-prod-springboot-headless
+  replicas: 2
+  podPort: 8080

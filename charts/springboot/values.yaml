@@ -74,3 +74,4 @@ networkPolicy:
     app.kubernetes.io/name: monapp
     app.kubernetes.io/instance: monapp-int-httpd
     app.kubernetes.io/component: httpd
+workloadKind: Deployment
