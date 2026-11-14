@@ -88,27 +88,52 @@
     "networkPolicy": {
       "type": "object",
       "properties": {
-        "frontendNamespace": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "routerNamespaceSelector": {
+          "type": "object"
+        }
+      }
+    },
+    "route": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "host": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 63,
-          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+          "maxLength": 253,
+          "pattern": "^[a-z0-9]+([.-][a-z0-9]+)*$"
         },
-        "frontendPodLabels": {
+        "cookieName": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "labels": {
           "type": "object",
-          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "annotations": {
+          "type": "object",
           "additionalProperties": {
             "type": "string"
           }
         }
       }
-    },
-    "workloadKind": {
-      "type": "string",
-      "enum": [
-        "Deployment",
-        "StatefulSet"
-      ]
     }
+  },
+  "not": {
+    "anyOf": [
+      {
+        "required": [
+          "workloadKind"
+        ]
+      }
+    ]
   }
 }

@@ -1,0 +1,3 @@
+{{- if eq .Values.route.host .Values.backendRoute.host -}}
+{{- fail "Les hosts frontend et backend doivent être différents (boucle proxy)" -}}
+{{- end -}}

@@ -1,21 +1,14 @@
 apiVersion: apps/v1
-kind: {{ .Values.workloadKind }}
+kind: Deployment
 metadata:
   name: {{ include "app.name" . }}
   namespace: {{ .Release.Namespace }}
 spec:
   replicas: {{ .Values.replicas }}
   revisionHistoryLimit: 3
-  {{- if eq .Values.workloadKind "StatefulSet" }}
-  serviceName: {{ include "app.headlessName" . }}
-  podManagementPolicy: Parallel
-  updateStrategy:
-    type: RollingUpdate
-  {{- else }}
   strategy:
     type: RollingUpdate
     rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
-  {{- end }}
   selector:
     matchLabels:
       {{- include "app.selector" . | nindent 6 }}

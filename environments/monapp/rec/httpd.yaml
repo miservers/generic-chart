@@ -1,15 +1,7 @@
 appName: monapp
 replicas: 2
-backend:
-  serviceName: monapp-rec-springboot
-  namespace: monapp-back-rec
-  port: 8080
 route:
   host: monapp-rec.apps.example.com
-stickySession:
-  enabled: true
-  cookieName: MONAPP_REC_ROUTE
-  statefulSetName: monapp-rec-springboot
-  headlessServiceName: monapp-rec-springboot-headless
-  replicas: 2
-  podPort: 8080
+  cookieName: MONAPP_REC_FRONT
+backendRoute:
+  host: monapp-back-rec.apps-internal.example.com

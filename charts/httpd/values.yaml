@@ -13,27 +13,19 @@ resources:
   limits:
     cpu: 500m
     memory: 256Mi
-clusterDomain: cluster.local
-backend:
-  serviceName: monapp-int-springboot
-  namespace: monapp-back-int
-  port: 8080
 route:
   enabled: true
   host: monapp-int.apps.example.com
+  cookieName: MONAPP_INT_FRONT
+  labels: {}
+  annotations:
+    haproxy.router.openshift.io/set-forwarded-headers: replace
 networkPolicy:
   enabled: true
   routerNamespaceSelector:
     matchLabels:
       network.openshift.io/policy-group: ingress
-stickySession:
-  enabled: false
-  cookieName: BACKEND_ROUTE
-  statefulSetName: monapp-int-springboot
-  headlessServiceName: monapp-int-springboot-headless
-  replicas: 2
-  podPort: 8080
-  healthCheckPath: /actuator/health/readiness
-  healthCheckInterval: 5
-  retrySeconds: 5
-  connectionTimeout: 3
+backendRoute:
+  host: monapp-back-int.apps-internal.example.com
+  caSecretName: ''
+  caSecretKey: ca.crt

@@ -1,58 +1,134 @@
-# Charts indépendants HTTPD et Spring Boot — OpenShift / Argo CD
+# HTTPD + Spring Boot : deux charts et affinité par Route OpenShift
 
-Le même dépôt contient **deux charts autonomes**, chacun avec son propre template de workload et ses propres valeurs :
+Le même dépôt contient deux charts autonomes et deux Applications Argo CD par application métier et environnement.
 
-| Répertoire | Application Argo CD INT | Namespace | Responsabilité |
+| Chart | Workload | Namespace INT | Responsabilité |
 |---|---|---|---|
-| `charts/httpd/` | `monapp-int-httpd` | `monapp-front-int` | Reverse proxy, configuration Apache, Route HTTPS, probes TCP |
-| `charts/springboot/` | `monapp-int-springboot` | `monapp-back-int` | Application Java, probes Actuator, certificats, AppDynamics, options JVM |
+| `charts/httpd` | Deployment, 2 pods | `monapp-front-int` | Route publique, reverse proxy HTTPS vers la Route backend |
+| `charts/springboot` | Deployment, 2 pods | `monapp-back-int` | Route backend avec cookie d'affinité, Java, certificats et AppDynamics optionnel |
 
-Il n'y a ni chart parent ni boucle commune pour générer les deux Deployments. Une mise à jour des paramètres Spring Boot n'impose aucun rollout HTTPD. Les cycles de synchronisation Argo CD sont indépendants.
+**Flux : navigateur → Route frontend → HTTPD → Route backend → pod Spring Boot.**
 
-## Organisation et fichiers
+Les backends sont de nouveau des Deployments classiques. HTTPD ne connaît ni les IP ni les noms individuels des pods. Il n'y a plus de StatefulSet, Service headless, BalancerMember ou cookie d'affinité fabriqué par Apache.
 
-- `charts/httpd/templates/deployment.yaml` : Deployment exclusivement HTTPD.
-- `charts/springboot/templates/workload.yaml` : StatefulSet ou Deployment exclusivement Spring Boot.
-- `environments/monapp/int/httpd.yaml` et `springboot.yaml` : paramètres INT, même organisation pour REC et PROD.
-- `argocd/httpd/monapp-int.yaml` et `argocd/springboot/monapp-int.yaml` : deux Applications, même dépôt Git et chemins de charts différents.
-- `examples/springboot-certificates-appdynamics.yaml` : surcharge facultative pour le backend.
-- `verify.py` : vérifie les rendus et les liens entre composants pour les trois environnements.
+## Répertoires
 
-## Installation
+- `charts/httpd/templates/deployment.yaml` : Deployment HTTPD.
+- `charts/springboot/templates/deployment.yaml` : Deployment Spring Boot.
+- `environments/monapp/{int,rec,prod}/httpd.yaml` et `springboot.yaml` : paramètres par composant, avec 2 réplicas chacun.
+- `argocd/httpd/monapp-{int,rec,prod}.yaml` et `argocd/springboot/monapp-{int,rec,prod}.yaml` : Applications indépendantes.
+- `examples/springboot-certificates-appdynamics.yaml` : surcharge Java facultative.
+- `verify.py` : vérification des rendus Helm et des liens entre charts.
+- `tests/route_proxy_smoke.py` : test local d'Apache vers un endpoint HTTPS simulé.
 
-Les valeurs fournies sont des exemples : remplacer les images et leurs versions, les domaines et les namespaces par les valeurs de votre plateforme. Fixer les images par digest approuvé en production ; le tag `latest` HTTPD fourni n'est qu'un point de départ.
+## Cookies et bascule
 
-Les deux namespaces doivent exister. Argo CD doit avoir accès en lecture au dépôt privé `https://github.com/miservers/generic-chart.git`, et son contrôleur doit disposer des droits sur les namespaces cibles. Le projet Argo CD utilisé (`default` dans les exemples) doit autoriser ces destinations et ce dépôt. Le chart ne crée pas les namespaces ni les droits cluster.
+Les deux Routes portent les annotations suivantes avec des noms de cookies distincts :
 
-Avec l'opérateur OpenShift GitOps, l'équipe plateforme peut déléguer la gestion de chaque namespace avec le label `argocd.argoproj.io/managed-by=openshift-gitops`, selon ses règles d'habilitation. Ce label attribue des permissions au contrôleur.
+```yaml
+# Route frontend INT
+router.openshift.io/cookie_name: MONAPP_INT_FRONT
+haproxy.router.openshift.io/disable_cookies: 'false'
+
+# Route backend INT
+router.openshift.io/cookie_name: MONAPP_INT_BACK
+haproxy.router.openshift.io/disable_cookies: 'false'
+```
+
+Le navigateur reçoit le cookie de la Route backend dans la réponse relayée par HTTPD, puis le renvoie à l'URL publique. HTTPD transmet le header `Cookie` vers la Route backend. Cela fonctionne avec les deux HTTPD : c'est le routeur backend qui interprète le cookie et sélectionne le pod Spring Boot. Le cookie de session Java, par exemple `JSESSIONID`, reste distinct et n'est pas remplacé par le cookie du routeur.
+
+Le client reste sur le même backend tant qu'il est disponible. Si le pod disparaît ou n'est plus disponible dans les endpoints, le routeur peut sélectionner un autre pod et actualiser l'affinité. **La session Java en mémoire n'est pas répliquée** : une reconnexion utilisateur peut être nécessaire. La détection et la mise à jour des endpoints prennent du temps ; une requête en cours peut échouer. Un redémarrage trop bref pour être observé peut ramener au même pod, mais sa session mémoire est tout de même perdue. Ne pas promettre le rejeu d'un POST non idempotent.
+
+Les cookies du routeur sont normalement host-only : le navigateur les associe à l'URL publique qu'il consulte, même s'ils ont été créés sur le saut backend. `ProxyPassReverseCookieDomain` réécrit en complément un Domain explicitement égal au hostname backend. Si l'application impose un autre domaine parent ou un autre chemin de cookie, adapter cette règle et la configuration de l'application. Chaque application/environnement doit avoir des noms de cookies distincts.
+
+## Valeurs principales
+
+```yaml
+# environments/monapp/int/httpd.yaml
+replicas: 2
+route:
+  host: monapp-int.apps.example.com
+  cookieName: MONAPP_INT_FRONT
+backendRoute:
+  host: monapp-back-int.apps-internal.example.com
+
+# environments/monapp/int/springboot.yaml
+replicas: 2
+image: registry.example.com/equipe/monapp:1.0.0
+route:
+  host: monapp-back-int.apps-internal.example.com
+  cookieName: MONAPP_INT_BACK
+  labels:
+    ingress-scope: internal
+```
+
+Les deux valeurs `httpd.backendRoute.host` et `springboot.route.host` doivent être identiques. Les noms de Route frontend et backend doivent être différents, sinon HTTPD bouclerait vers lui-même. Les hosts sont explicites pour conserver l'indépendance des Applications Argo CD.
+
+La cible est toujours `https://HOST_BACKEND/`, port 443. HTTPD utilise `ProxyPreserveHost Off` : le Host et le SNI correspondent à la Route backend, ce qui permet son routage et la vérification TLS. Il définit `X-Forwarded-Host` sur le domaine public, `X-Forwarded-Proto=https` et `X-Forwarded-Port=443` pour Spring Boot, et supprime un éventuel header `Forwarded` reçu. `ProxyAddHeaders Off` évite d'ajouter une autre valeur de Host transmis. Spring Boot conserve `SERVER_FORWARD_HEADERS_STRATEGY=framework` dans les valeurs par défaut.
+
+`ProxyPassReverse` traduit les redirections HTTP vers le domaine public. `ServerName https://HOST_PUBLIC:443` et `UseCanonicalName On` évitent de produire des redirections en HTTP à cause du saut edge → HTTPD. Apache peut avertir au démarrage qu'un ServerName HTTPS est associé à un listener HTTP : ici TLS entrant est terminé par le routeur, c'est volontaire. Aucun chiffrement entrant n'est activé dans HTTPD.
+
+L'annotation `haproxy.router.openshift.io/set-forwarded-headers` vaut `replace` côté frontend et `never` côté backend, afin de ne pas reconstruire la chaîne Forwarded/X-Forwarded-For sur le second saut. Cette annotation n'est pas une garantie générale sur tous les headers : vérifier le comportement de votre IngressController, notamment `X-Forwarded-Host`, avec l'application. Ne pas utiliser une adresse fournie dans X-Forwarded-For comme preuve d'identité sans politique de confiance adaptée.
+
+## TLS de la Route backend
+
+Les deux Routes utilisent une terminaison edge avec redirection HTTP → HTTPS. HTTPD vérifie le certificat du routeur backend : `SSLProxyVerify require`, nom DNS et expiration contrôlés. La résolution DNS de `backendRoute.host` doit pointer vers le routeur joignable depuis les pods HTTPD, et le certificat doit couvrir ce host.
+
+Par défaut, HTTPD utilise le bundle système UBI `/etc/pki/tls/certs/ca-bundle.crt`. Si le routeur utilise une CA privée, créer un Secret dans le **namespace frontend**, puis configurer :
+
+```yaml
+backendRoute:
+  host: monapp-back-int.apps-internal.example.com
+  caSecretName: internal-router-ca
+  caSecretKey: ca.crt
+```
+
+Le Secret doit contenir la chaîne CA PEM de confiance dans la clé indiquée. Elle est montée en lecture seule sous `/etc/backend-route-ca/ca.crt`. Cette CA concerne HTTPD vers le routeur ; elle est indépendante des truststores Java du backend. Ne pas désactiver la vérification TLS pour contourner un problème de certificat. Après rotation de cette CA, prévoir un rollout HTTPD pour recharger la confiance. Les changements de ConfigMap HTTPD déclenchent déjà son rollout via checksum.
+
+Le trafic routeur → HTTPD et routeur → Spring Boot reste HTTP avec edge. Une exigence TLS jusqu'aux pods demanderait une variante reencrypt.
+
+## Route backend interne et réseau
+
+**Le label `ingress-scope: internal` ne rend pas une Route privée à lui seul.** Il est fourni comme convention à adapter. L'équipe plateforme doit avoir un IngressController interne qui sélectionne ce label, et exclure ces Routes des IngressControllers publics. Elle doit aussi fournir le DNS et un certificat adaptés. Les charts ne créent ni ne modifient les IngressControllers du cluster.
+
+Un routeur interne limite l'exposition réseau, mais ne signifie pas automatiquement « accessible uniquement par HTTPD ». Si le contournement du frontal doit être interdit pour les autres clients internes, prévoir les restrictions d'accès réseau / ACL du routeur adaptées à la plateforme. Une Route backend admise par le routeur public peut exposer directement Spring Boot, y compris ses endpoints techniques. L'interdiction `/actuator` dans HTTPD ne protège pas une requête qui contourne HTTPD.
+
+Les NetworkPolicies d'entrée des deux charts autorisent désormais les pods du routeur, sélectionnés par `networkPolicy.routerNamespaceSelector`, sur le port applicatif. Le sélecteur par défaut utilise `network.openshift.io/policy-group: ingress` et un `podSelector: {}`. Adapter ce sélecteur si votre routeur interne utilise une autre topologie. La policy backend n'autorise plus directement HTTPD. Les policies sont additives : une règle préexistante permissive reste effective.
+
+Les charts ne filtrent pas les sorties. Avec un deny egress existant, autoriser DNS et HTTPD → adresse/port HTTPS du routeur, selon le chemin réel (Service, VIP, SNAT, hostNetwork), ainsi que les sorties Java requises vers DB, RabbitMQ, AppDynamics ou proxy. La policy backend voit la provenance du routeur, pas celle du pod HTTPD d'origine ; elle ne suffit donc pas à prouver que le client est passé par le frontal.
+
+Pour vérifier l'admission des Routes :
 
 ```sh
-# Après préparation des paramètres et commit dans Git :
+oc get route -n monapp-front-int monapp-int-httpd -o yaml
+oc get route -n monapp-back-int monapp-int-springboot -o yaml
+# Contrôler status.ingress : routerName, conditions Admitted et hostname.
+```
+
+## Installation Argo CD
+
+1. Adapter les domaines, images et namespaces des fichiers d'environnement. Fixer les images par digest approuvé en production ; `latest` HTTPD reste une valeur illustrative.
+2. Faire préparer les deux namespaces, les droits du contrôleur Argo CD et la Route interne par l'équipe plateforme. Aucun namespace ou droit cluster n'est créé par ces charts.
+3. Configurer l'accès en lecture au dépôt privé `https://github.com/miservers/generic-chart.git`. Choisir un AppProject autorisant ce dépôt et les destinations (`default` dans les exemples).
+4. Committer les paramètres, puis créer les Applications :
+
+```sh
 oc apply -f argocd/springboot/monapp-int.yaml
 oc apply -f argocd/httpd/monapp-int.yaml
 ```
 
-INT et REC sont configurés en auto-sync ; PROD reste en synchronisation manuelle. Attendre que Spring Boot soit Healthy avant de synchroniser HTTPD limite les réponses 503 au premier démarrage. Deux Applications distinctes n'ont pas d'ordre de déploiement garanti entre elles.
+INT et REC utilisent auto-sync ; PROD reste manuel. Les Applications ont des cycles indépendants : vérifier la disponibilité du backend et l'admission de sa Route avant de synchroniser HTTPD évite les erreurs initiales. Avec OpenShift GitOps Operator, la délégation via `argocd.argoproj.io/managed-by=openshift-gitops` relève de l'équipe plateforme et attribue des droits au contrôleur.
 
-## Liaison HTTPD / Spring Boot
+Pour une nouvelle application, dupliquer les fichiers d'environnement et les deux Applications, changer `appName`, les releaseNames, namespaces, hosts, noms de cookies et images. Conserver les chemins `charts/httpd` et `charts/springboot`. Garder les labels de sélection stables lors des mises à jour des Deployments.
 
-Le chart Spring Boot nomme son Service d'après `helm.releaseName`, soit `monapp-int-springboot`. HTTPD renseigne explicitement la cible :
+## Spécifiques Spring Boot conservés
 
-```yaml
-# environments/monapp/int/httpd.yaml
-backend:
-  serviceName: monapp-int-springboot
-  namespace: monapp-back-int
-  port: 8080
-```
+- `certificates` monte des Secrets existants dans le namespace backend, en lecture seule.
+- `javaToolOptions` configure les options JVM.
+- `appdynamics` injecte facultativement l'agent Java par init container et référence une clé d'accès dans un Secret.
+- `env`, `envFrom`, `extraVolumes`, `extraVolumeMounts`, `podAnnotations` et les ressources/probes restent propres au backend.
 
-Sans sticky session, le proxy cible `http://monapp-int-springboot.monapp-back-int.svc.cluster.local:8080/`. Avec la sticky session activée dans les exemples, HTTPD cible individuellement les deux pods par leur DNS stable, comme décrit ci-dessous. Le domaine du cluster est configurable avec `clusterDomain`. Si le nom du Service change (`fullnameOverride` ou nom de release), mettre à jour cette référence côté HTTPD. Si le port du conteneur change, mettre à jour `port` dans Spring Boot ; le chart produit automatiquement `SERVER_PORT`. Le `backend.port` d'HTTPD doit correspondre au `servicePort` de Spring Boot.
-
-Les règles réseau d'entrée sont gérées séparément : HTTPD autorise le routeur, Spring Boot autorise les pods HTTPD sélectionnés par leurs labels ET leur namespace. Adapter `networkPolicy.frontendNamespace` et `networkPolicy.frontendPodLabels` si la release HTTPD change. Les règles sont additives ; une autre NetworkPolicy permissive reste effective. Les sorties ne sont pas filtrées par ces charts. En présence d'un deny egress existant, autoriser DNS, HTTPD vers Spring Boot, puis les flux backend vers DB, RabbitMQ, AppDynamics ou proxy selon les besoins.
-
-## Certificats côté Spring Boot
-
-Les certificats, truststores ou keystores sont montés depuis des Secrets existants dans le namespace backend, sans copier de contenu sensible dans Git :
+Exemple de truststore :
 
 ```yaml
 certificates:
@@ -64,166 +140,64 @@ javaToolOptions: >-
   -Djavax.net.ssl.trustStoreType=JKS
 ```
 
-Dans cet exemple, le Secret doit contenir la clé fichier `truststore.jks`. Le chart monte le Secret en lecture seule et sélectionne ce truststore pour JSSE. **Monter un PEM seul ne suffit pas à l'importer dans le truststore Java.** L'exemple attend un JKS déjà préparé, composé de certificats de confiance publics. Il remplace la sélection du truststore Java par défaut : inclure les autorités publiques et internes nécessaires.
+Le Secret contient `truststore.jks`, préparé avec toutes les CA nécessaires. Monter un PEM ne l'importe pas automatiquement dans Java. Ce JKS contient uniquement des certificats publics et est lu sans mot de passe de vérification d'intégrité. Une clé privée / un keystore client demande une configuration applicative et des références Secret distinctes. Ne pas mettre de mot de passe dans `JAVA_TOOL_OPTIONS`, que la JVM peut afficher. La sélection de ce truststore remplace celle du truststore par défaut pour les clients JSSE concernés ; elle ne modifie pas la confiance OS ou les clients utilisant un contexte TLS indépendant. Prévoir un rollout après rotation.
 
-Le JKS de l'exemple est lu sans mot de passe de vérification d'intégrité ; il ne contient aucune clé privée. Un keystore client avec clé privée/mot de passe demande une configuration applicative distincte, par exemple des propriétés Spring et des références Secret via `env`/`envFrom`. Ne pas passer de mot de passe dans `javaToolOptions` : la JVM peut afficher `JAVA_TOOL_OPTIONS` au démarrage. Le chart ne modifie pas le magasin de confiance OS ni les clients qui utilisent leur propre contexte TLS.
+Pour AppDynamics, adapter `examples/springboot-certificates-appdynamics.yaml` puis l'ajouter après les valeurs d'environnement dans `source.helm.valueFiles`. L'image d'agent doit contenir `/bin/sh`, `cp`, `chmod`, l'agent complet et `javaagent.jar` à la racine de `agentSourceDir`, fonctionner avec UID arbitraire et être compatible avec le JDK et le contrôleur utilisés. L'init container copie l'agent dans un `emptyDir` ; `-javaagent:/opt/appdynamics/javaagent.jar` est ajouté aux options JVM. Le nom du pod identifie le nœud AppDynamics. Le Secret d'accès doit exister dans le namespace backend ; aucune valeur secrète n'est stockée dans Git.
 
-Après rotation d'un certificat, prévoir un rollout Java pour recharger les magasins déjà ouverts. `podAnnotations` permet de versionner explicitement la configuration pour déclencher ce rollout.
+L'exemple AppDynamics cible INT et contient des placeholders. Prévoir des paramètres distincts REC/PROD. Il concerne l'agent Java APM uniquement. La confiance TLS du contrôleur peut nécessiter des paramètres propres à l'agent. Après rotation de sa clé, prévoir un rollout. HTTPD n'injecte aucun agent Java.
 
-## AppDynamics côté Spring Boot
+Les listes Helm sont remplacées par les surcharges : conserver les variables nécessaires dans `env`. `SERVER_PORT` est généré depuis `port`. Les variables gérées et les noms de volumes réservés sont validés pour éviter les doublons.
 
-AppDynamics est désactivé par défaut et absent du chart HTTPD. Pour l'activer, adapter les paramètres de `examples/springboot-certificates-appdynamics.yaml`, puis ajouter cette surcharge dans l'Application Argo CD Spring Boot :
+## Probes, images et logs
 
-```yaml
-helm:
-  releaseName: monapp-int-springboot
-  valueFiles:
-    - ../../environments/monapp/int/springboot.yaml
-    - ../../examples/springboot-certificates-appdynamics.yaml
-```
+Spring Boot doit inclure Actuator et exposer les probes `/actuator/health/liveness` et `/actuator/health/readiness` au kubelet, sur le port applicatif, sans authentification. Adapter les chemins au context-path. Ne pas faire dépendre la liveness d'une base de données. La readiness gouverne les endpoints disponibles pour la Route backend.
 
-L'exemple de surcharge contient des placeholders et cible INT : créer une version par environnement avant activation en REC/PROD. Il configure :
+HTTPD utilise des probes TCP, qui ne garantissent pas la disponibilité de la Route backend. Les chemins et modules sont ceux d'UBI `httpd-24`, avec `/usr/sbin/httpd` et `mod_ssl`. Valider l'image approuvée avant promotion. Les logs Apache vont sur stdout/stderr ; l'image Spring Boot doit également prévoir ses logs console. Les images doivent accepter l'UID arbitraire OpenShift ; aucun UID/fsGroup n'est imposé. Le système de fichiers HTTPD est en lecture seule avec des volumes temporaires dédiés.
 
-1. Un init container copiant l'agent depuis une image interne vers un `emptyDir`.
-2. Le montage de ce volume à `/opt/appdynamics` dans le conteneur Java.
-3. L'ajout de `-javaagent:/opt/appdynamics/javaagent.jar` aux `javaToolOptions` existantes.
-4. Le contrôleur, l'application, le tier et le compte par variables d'environnement.
-5. La clé d'accès depuis `appdynamics.accessKeySecret`, sans sa valeur dans Git.
-6. Un nom de nœud AppDynamics unique, dérivé du nom du pod.
+## Migration depuis les versions précédentes
 
-L'image agent doit contenir `/bin/sh`, `cp`, `chmod` et l'agent complet, avec `javaagent.jar` directement dans `agentSourceDir` (par défaut `/opt/appdynamics`). Elle doit fonctionner avec un UID arbitraire OpenShift. Choisir une version d'agent compatible avec le contrôleur AppDynamics ET le JDK ; aucune compatibilité avec votre contrôleur n'a été testée ici. L'image d'application doit lancer une JVM qui conserve `JAVA_TOOL_OPTIONS`, sans déjà injecter le même agent. Le répertoire agent reste inscriptible pour ses logs et son runtime.
+Cette version retire le StatefulSet, le Service headless et le balancer Apache du commit `78ad91b96c36bff2fbdc267a3d4a7477ffa925ae`. Les anciennes valeurs `workloadKind` et `stickySession` sont rejetées par les schémas, afin de détecter une migration incomplète. Supprimer aussi les anciennes valeurs de cible Service côté HTTPD et les remplacer par `backendRoute`.
 
-Le Secret d'accès doit exister dans le namespace backend avec la clé `access-key`. La confiance TLS du contrôleur peut demander une configuration propre à l'agent selon sa version : le montage du truststore applicatif ne garantit pas à lui seul la confiance de l'agent. Prévoir aussi les sorties réseau nécessaires vers le contrôleur et les autres services AppDynamics utilisés. Cette configuration concerne l'agent Java APM, pas un Machine Agent, Analytics Agent ou Cluster Agent.
+Si rien n'a été déployé, utiliser directement cette version. Si un StatefulSet est déjà actif, planifier une fenêtre de maintenance ou une migration parallèle avec des noms ET des sélecteurs différents. Suspendre auto-sync/self-heal avant une migration manuelle. **Ne pas faire coexister un Deployment et un StatefulSet avec les mêmes sélecteurs.** En migration avec interruption, retirer l'ancien contrôleur avant de démarrer le nouveau. Puis valider la Route backend interne, sa confiance TLS et sa disponibilité, avant la synchronisation HTTPD. Les sessions existantes ne sont pas conservées.
 
-Les paramètres `javaToolOptions` et `appdynamics` sont les points d'entrée dédiés. Le chart rejette leur redéfinition contradictoire dans `env`. Une nouvelle image d'agent déclenche un rollout backend uniquement. Pour la rotation de la clé dans un Secret externe, prévoir un rollout ou un mécanisme de rechargement approprié.
+L'ancien chart combiné `spring-httpd` reste consultable au commit `6de839f2e65ccdf58f465ad2e2fe55495c7b26f7`. Une Application qui utilise encore ce chemin doit être épinglée à cette ancienne révision pendant sa migration, au lieu de suivre `main`. Aucun changement n'est exécuté sur le cluster par cette livraison.
 
-## Autres spécifiques Spring Boot
-
-- `env` et `envFrom` : variables et références ConfigMap/Secret ; ne pas stocker les mots de passe dans les valeurs Git.
-- `extraVolumes` et `extraVolumeMounts` : autres configurations ou volumes nécessaires à Java. Les noms `tmp` et `appdynamics` sont réservés.
-- `resources`, `startupProbe`, `readinessProbe`, `livenessProbe` : indépendants du frontend.
-- `podAnnotations` : annotations de supervision et révision de configuration.
-- Les listes Helm sont remplacées en entier par une surcharge : préserver les entrées nécessaires dans `env`.
-
-Actuator doit être présent et les endpoints `/actuator/health/liveness` et `/actuator/health/readiness` accessibles au kubelet sur le port applicatif. Adapter les probes à votre context-path et à votre configuration Spring Security. Ne pas faire dépendre la liveness d'une base de données.
-
-## Hypothèses HTTPD et OpenShift
-
-HTTPD est un reverse proxy : toute l'application, y compris les pages éventuelles, est servie par Spring Boot. Un frontend SPA autonome demanderait une extension du chart HTTPD.
-
-La Route termine TLS en mode edge avec le certificat du routeur, et redirige HTTP vers HTTPS. Le domaine doit être couvert par ce certificat. Le trafic interne est HTTP. Le chart fixe `X-Forwarded-Proto=https` et `X-Forwarded-Port=443` : si la Route est désactivée, le frontal externe doit aussi garantir HTTPS. Une exigence TLS interne nécessite une configuration supplémentaire.
-
-La configuration HTTPD est adaptée à UBI `httpd-24` et son exécutable `/usr/sbin/httpd`. Ne pas remplacer par une image ayant d'autres chemins sans adaptation. La racine du conteneur HTTPD est en lecture seule, avec runtime en `emptyDir`. Les deux charts n'imposent aucun UID/fsGroup ; les images doivent être compatibles avec les attributions OpenShift restricted-v2.
-
-Les logs HTTPD vont sur stdout/stderr. Les probes HTTPD sont TCP, donc vérifient le port, pas la disponibilité fonctionnelle du backend. Une modification de sa ConfigMap déclenche son rollout via checksum.
-
-Les exemples activent la sticky session vers Spring Boot, sans réplication de session. Un cookie du routeur colle seulement à HTTPD ; le cookie BACKEND_ROUTE (nom par application/environnement dans les exemples) sélectionne le backend sur les deux HTTPD. L'IP cliente via X-Forwarded-For nécessite une chaîne de proxys de confiance.
-
-## Sticky session : 2 HTTPD et 2 Spring Boot
-
-Les exemples INT, REC et PROD déploient **2 réplicas HTTPD et 2 réplicas Spring Boot**. Le cookie de session Java (par exemple JSESSIONID) reste géré par l'application. HTTPD ajoute un cookie séparé, `MONAPP_INT_ROUTE` en INT, qui vaut `.pod0` ou `.pod1` et reste identique quel que soit le frontal HTTPD utilisé.
-
-- Même cookie + backend sain : même pod Spring Boot.
-- Backend indisponible : `nofailover=Off` permet d'en sélectionner un autre et le cookie d'affinité est mis à jour. La session Java en mémoire est perdue ; une reconnexion utilisateur peut être nécessaire.
-- Backend rétabli : le client reste sur le backend de remplacement indiqué par son nouveau cookie.
-- Redémarrage d'un HTTPD : l'autre HTTPD interprète le même cookie avec la même correspondance de routes.
-- Redémarrage très bref du backend avant détection : le même nom de pod peut être retrouvé, mais la session mémoire reste perdue. Le mécanisme ne garantit pas une bascule si la panne n'est pas observée.
-
-Les backends utilisent un **StatefulSet sans PVC** uniquement pour leur identité réseau stable :
-
-- `monapp-int-springboot-0.monapp-int-springboot-headless.monapp-back-int.svc.cluster.local`
-- `monapp-int-springboot-1.monapp-int-springboot-headless.monapp-back-int.svc.cluster.local`
-
-Le Service headless possède `publishNotReadyAddresses: true`, afin que l'adresse DNS existe aussi pendant les transitions de readiness. HTTPD contacte donc les pods directement et réalise ses propres healthchecks GET sur `/actuator/health/readiness` toutes les 5 secondes ; seul un code 2xx est accepté. Le Service ClusterIP classique reste disponible mais n'est pas utilisé par HTTPD en mode sticky. Adapter `stickySession.healthCheckPath` en même temps que les probes Spring Boot si nécessaire, et rendre cette URL accessible sans authentification depuis HTTPD. L'endpoint Actuator reste interdit aux clients externes par HTTPD.
-
-Les connexions aux membres utilisent `disablereuse=On` pour éviter que des connexions/DNS conservés par HTTPD continuent de cibler une ancienne IP. Cela coûte une nouvelle connexion backend par requête et ne supprime pas les délais de cache DNS du cluster. Les délais de connexion, healthchecks et retry influencent la durée de bascule ; ce n'est pas une garantie de zéro erreur. Une requête en vol peut échouer, notamment si le serveur tombe après son envoi. Ne pas rejouer automatiquement un POST non idempotent côté client.
-
-```yaml
-# environments/monapp/int/httpd.yaml
-replicas: 2
-stickySession:
-  enabled: true
-  cookieName: MONAPP_INT_ROUTE
-  statefulSetName: monapp-int-springboot
-  headlessServiceName: monapp-int-springboot-headless
-  replicas: 2
-  podPort: 8080
-
-# environments/monapp/int/springboot.yaml
-replicas: 2
-workloadKind: StatefulSet
-```
-
-Les paramètres `stickySession.replicas`, `statefulSetName`, `headlessServiceName` et `podPort` doivent correspondre au workload backend, à son Service headless et au port du conteneur (pas nécessairement au port du Service ClusterIP). Ne pas activer un HPA backend sans automatiser également la mise à jour de la liste des membres HTTPD. Pour changer le nombre de backends, augmenter d'abord le StatefulSet puis HTTPD ; pour diminuer, retirer d'abord les membres de la configuration HTTPD puis réduire le StatefulSet. Le nom headless est le nom du workload tronqué à 54 caractères, suivi de `-headless`.
-
-Les cookies sont `Secure`, `HttpOnly`, `SameSite=Lax`, chemin `/`, et propres à chaque application/environnement. HTTPS est requis. Pour plusieurs applications sous le même domaine, utiliser des noms de cookies différents. Le choix de SameSite peut demander une adaptation si votre application nécessite un usage cross-site.
-
-Les modules `mod_proxy_balancer`, `mod_slotmem_shm`, `mod_lbmethod_byrequests`, `mod_watchdog` et `mod_proxy_hcheck` sont chargés en mode sticky. Valider leur présence dans l'image HTTPD approuvée avec un test de démarrage. Les logs d'accès incluent `worker=pod0` ou `worker=pod1` pour observer la cible.
-
-### Déploiement existant
-
-Le type de workload change dans les exemples : **Deployment → StatefulSet**. Si la version précédente est déjà déployée, prévoir une fenêtre de maintenance ou une migration parallèle avec un nom ET des sélecteurs distincts. Suspendre auto-sync/self-heal pendant une migration manuelle. Ne pas faire coexister deux contrôleurs ayant les mêmes sélecteurs. Lors d'une migration avec interruption, retirer l'ancien Deployment avant de démarrer le StatefulSet, puis synchroniser HTTPD après disponibilité des backends. Cette modification ne conserve pas les sessions existantes. Aucun changement n'est appliqué au cluster par cette livraison.
-
-Le chart conserve `workloadKind: Deployment` et `stickySession.enabled: false` comme valeurs de base pour les applications qui n'ont pas besoin d'affinité ; les fichiers d'environnement activent explicitement le profil sticky à deux pods.
-
-### Tests
-
-`verify.py` contrôle les deux réplicas, les noms DNS par ordinal, le Service headless, les règles réseau, les cookies et les variantes sans sticky.
-
-`tests/httpd_sticky_smoke.py` démarre deux vrais processus Apache 2.4 et deux backends HTTP simulés, localement. Il vérifie le maintien de l'affinité entre les deux frontaux, la bascule sur readiness 503, le changement de cookie, le retour du backend, une panne TCP et l'arrêt d'un frontal. Exécution :
-
-```sh
-APACHE_BIN=/chemin/vers/httpd APACHE_MODULES=/chemin/vers/modules python3 tests/httpd_sticky_smoke.py
-```
-
-Ce test adapte les chemins/modules locaux et utilise des ports locaux, pas le DNS Kubernetes. Il ne valide ni l'image UBI ni le cluster réel. Sur OpenShift, vérifier d'abord la syntaxe HTTPD et les healthchecks, puis utiliser un navigateur HTTPS ou `curl -c cookies.txt -b cookies.txt https://VOTRE_HOST/` et observer `worker=` dans les logs. Tester la suppression d'un pod uniquement sur un environnement de test ; une recréation très rapide peut ne pas provoquer de bascule observable.
-
-## Migration de l'ancien chart combiné
-
-Le chart `spring-httpd` a été remplacé par les deux charts. Sa dernière version reste dans Git au commit `6de839f2e65ccdf58f465ad2e2fe55495c7b26f7`.
-
-Si l'ancien projet n'a pas encore été déployé, utiliser directement les nouvelles Applications. S'il existe déjà sur un cluster :
-
-1. Avant de synchroniser la nouvelle structure, désactiver l'auto-sync de l'ancienne Application et fixer son `targetRevision` au commit ci-dessus. Si une Application parente la gère, effectuer aussi ces changements dans cette source. Ne pas laisser l'ancienne Application suivre un chemin supprimé sur `main`.
-2. Déployer le nouveau Spring Boot, puis valider ses dépendances, probes, certificats et supervision.
-3. Pour tester HTTPD en parallèle, utiliser d'abord un hostname temporaire couvert par votre certificat. Ne pas publier deux Routes avec le même hostname. Planifier le transfert du hostname public, par exemple lors d'une courte fenêtre de maintenance.
-4. Après bascule et validation, supprimer l'ancienne Application et ses anciennes ressources selon votre procédure. Vérifier la portée du prune/finalizer avant toute suppression. Ne pas changer brutalement le propriétaire Argo CD d'une ressource existante.
-
-Les nouveaux noms incluent `-httpd` et `-springboot`, distincts des anciens `-frontend` et `-backend`. Cette livraison ne réalise aucune migration ni suppression sur un cluster.
-
-## Validation
+## Vérifications
 
 ```sh
 helm lint charts/httpd charts/springboot
-python3 verify.py  # Helm dans PATH et PyYAML requis
+python3 verify.py  # Helm dans PATH et PyYAML
 helm template monapp-int-httpd charts/httpd -n monapp-front-int -f environments/monapp/int/httpd.yaml
 helm template monapp-int-springboot charts/springboot -n monapp-back-int -f environments/monapp/int/springboot.yaml
 ```
 
-Depuis un poste connecté au cluster, valider chaque rendu avec `oc apply --dry-run=server -f -`, puis contrôler les rollouts et les logs. Pour vérifier la syntaxe HTTPD dans son image :
+Depuis un poste connecté, valider chaque rendu avec `oc apply --dry-run=server -f -`, puis après synchronisation :
 
 ```sh
+oc rollout status -n monapp-back-int deployment/monapp-int-springboot
+oc rollout status -n monapp-front-int deployment/monapp-int-httpd
 oc exec -n monapp-front-int deployment/monapp-int-httpd -- /usr/sbin/httpd -t -f /etc/custom-httpd/httpd.conf
-oc rollout status -n monapp-back-int statefulset/monapp-int-springboot
-oc logs -n monapp-back-int monapp-int-springboot-0 -c install-appdynamics
+curl -v -c cookies.txt -b cookies.txt https://monapp-int.apps.example.com/
 ```
 
-Vérifications locales réalisées : lint des deux charts ; rendus INT/REC/PROD ; namespace unique par chart ; correspondance DNS, Service, sélecteurs et règles réseau ; chemins Argo CD ; activation et absence d'AppDynamics ; montage des certificats et références Secret ; rejets des configurations incomplètes ou conflictuelles. Aucun déploiement réel ni démarrage d'agent AppDynamics n'a été effectué ici.
+Pour tester l'affinité réelle, utiliser un endpoint de diagnostic applicatif indiquant le pod et/ou un identifiant de requête visible dans les logs backend. Conserver le même cookie jar, vérifier le même pod, puis provoquer une panne uniquement en environnement de test et vérifier la bascule. Contrôler aussi que la Route backend n'est pas joignable depuis les réseaux non autorisés.
+
+Validation locale : lint et rendu INT/REC/PROD, deux réplicas, deux Deployments, correspondance des hosts, cookies distincts, policies routeur, montage CA, options Java/AppDynamics et rejet des anciens paramètres. Le test suivant utilise deux Apache réels et un serveur HTTPS simulé :
+
+```sh
+APACHE_BIN=/chemin/httpd APACHE_MODULES=/chemin/modules python3 tests/route_proxy_smoke.py
+```
+
+Il contrôle Host/SNI, headers publics, transmission des cookies dans les deux sens, réécriture du Domain, redirection HTTPS et rejet d'un certificat au mauvais nom. Il adapte les chemins/modules locaux et **ne teste pas le routeur OpenShift, son affinité réelle, l'image UBI ou le réseau du cluster**. Aucun déploiement réel ni démarrage de l'agent AppDynamics n'a été effectué ici.
 
 ## Références officielles
 
-- [Argo CD et Helm](https://argo-cd.readthedocs.io/en/stable/user-guide/helm/)
-- [OpenShift GitOps et permissions](https://docs.redhat.com/en/documentation/red_hat_openshift_gitops/1.21/html/multitenancy/multitenancy-support-in-gitops)
+- [Routes et cookies OpenShift 4.18](https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/pdf/ingress_and_load_balancing/routes)
+- [Sélection des Routes par IngressController](https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html/ingress_and_load_balancing/configuring-ingress-cluster-traffic)
 - [NetworkPolicies OpenShift](https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/network_security/network-policy)
-- [DNS Kubernetes](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/)
-- [Apache ProxyPass](https://httpd.apache.org/docs/2.4/mod/mod_proxy.html)
+- [Argo CD et Helm](https://argo-cd.readthedocs.io/en/stable/user-guide/helm/)
+- [Apache ProxyPass, Host et cookies](https://httpd.apache.org/docs/2.4/mod/mod_proxy.html)
+- [Apache vérification TLS du proxy](https://httpd.apache.org/docs/2.4/mod/mod_ssl.html)
 - [Spring Boot Actuator](https://docs.spring.io/spring-boot/reference/actuator/endpoints.html)
 - [AppDynamics : agent Java dans les conteneurs](https://docs.appdynamics.com/appd/onprem/24.x/24.6/en/application-monitoring/install-app-server-agents/java-agent/install-the-java-agent/install-the-java-agent-in-containers)
-- [AppDynamics : variables d'environnement](https://docs.appdynamics.com/appd/24.x/25.5/en/application-monitoring/install-app-server-agents/java-agent/install-the-java-agent/use-environment-variables-for-java-agent-settings)
-- [Oracle : JAVA_TOOL_OPTIONS](https://docs.oracle.com/en/java/javase/24/troubleshoot/environment-variables-and-system-properties.html)
-- [Oracle : truststore JSSE](https://docs.oracle.com/en/java/javase/25/security/java-secure-socket-extension-jsse-reference-guide.html)
-
-- [Apache : sticky session par cookie](https://httpd.apache.org/docs/2.4/mod/mod_proxy_balancer.html)
-- [Apache : contrôle actif des backends](https://httpd.apache.org/docs/2.4/mod/mod_proxy_hcheck.html)
-- [Apache : retry, nofailover et disablereuse](https://httpd.apache.org/docs/2.4/mod/mod_proxy.html)
-- [Kubernetes : identité réseau des StatefulSets](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/)
+- [Oracle truststore JSSE](https://docs.oracle.com/en/java/javase/25/security/java-secure-socket-extension-jsse-reference-guide.html)

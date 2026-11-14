@@ -30,95 +30,73 @@
       "type": "integer",
       "minimum": 1
     },
-    "clusterDomain": {
-      "type": "string",
-      "pattern": "^[a-z0-9]+([.-][a-z0-9]+)*$"
-    },
-    "backend": {
-      "type": "object",
-      "required": [
-        "serviceName",
-        "namespace",
-        "port"
-      ],
-      "properties": {
-        "serviceName": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 63,
-          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
-        },
-        "namespace": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 63,
-          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
-        },
-        "port": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 65535
-        }
-      }
-    },
     "route": {
-      "type": "object",
-      "properties": {
-        "host": {
-          "type": "string",
-          "pattern": "^[a-z0-9]+([.-][a-z0-9]+)*$"
-        }
-      }
-    },
-    "stickySession": {
       "type": "object",
       "properties": {
         "enabled": {
           "type": "boolean"
         },
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[a-z0-9]+([.-][a-z0-9]+)*$"
+        },
         "cookieName": {
           "type": "string",
           "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
         },
-        "statefulSetName": {
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "backendRoute": {
+      "type": "object",
+      "properties": {
+        "host": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 60,
-          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+          "maxLength": 253,
+          "pattern": "^[a-z0-9]+([.-][a-z0-9]+)*$"
         },
-        "headlessServiceName": {
+        "caSecretName": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 63,
-          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+          "pattern": "^$|^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
         },
-        "replicas": {
-          "type": "integer",
-          "minimum": 2,
-          "maximum": 100
-        },
-        "podPort": {
-          "type": "integer",
-          "minimum": 1024,
-          "maximum": 65535
-        },
-        "healthCheckPath": {
+        "caSecretKey": {
           "type": "string",
-          "pattern": "^/[A-Za-z0-9/_~.-]*$"
-        },
-        "healthCheckInterval": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "retrySeconds": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "connectionTimeout": {
-          "type": "integer",
-          "minimum": 1
+          "pattern": "^[A-Za-z0-9._-]+$"
         }
       }
     }
+  },
+  "not": {
+    "anyOf": [
+      {
+        "required": [
+          "stickySession"
+        ]
+      },
+      {
+        "required": [
+          "backend"
+        ]
+      },
+      {
+        "required": [
+          "clusterDomain"
+        ]
+      }
+    ]
   }
 }

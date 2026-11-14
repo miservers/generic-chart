@@ -57,6 +57,9 @@ spec:
             - {name: tmp, mountPath: /tmp}
             - {name: runtime, mountPath: /run/httpd}
             - {name: config, mountPath: /etc/custom-httpd, readOnly: true}
+            {{- if .Values.backendRoute.caSecretName }}
+            - {name: backend-route-ca, mountPath: /etc/backend-route-ca, readOnly: true}
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
@@ -65,3 +68,11 @@ spec:
         - name: config
           configMap:
             name: {{ include "app.name" . }}
+        {{- if .Values.backendRoute.caSecretName }}
+        - name: backend-route-ca
+          secret:
+            secretName: {{ .Values.backendRoute.caSecretName }}
+            items:
+              - key: {{ .Values.backendRoute.caSecretKey }}
+                path: ca.crt
+        {{- end }}

@@ -1,10 +1,8 @@
 appName: monapp
 replicas: 2
 image: registry.example.com/equipe/monapp:1.0.0
-networkPolicy:
-  frontendNamespace: monapp-front-int
-  frontendPodLabels:
-    app.kubernetes.io/name: monapp
-    app.kubernetes.io/instance: monapp-int-httpd
-    app.kubernetes.io/component: httpd
-workloadKind: StatefulSet
+route:
+  host: monapp-back-int.apps-internal.example.com
+  cookieName: MONAPP_INT_BACK
+  labels:
+    ingress-scope: internal

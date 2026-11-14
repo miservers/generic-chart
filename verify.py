@@ -11,7 +11,7 @@ def render(comp,env='int',extra=None,ok=True):
  assert (r.returncode==0)==ok,r.stderr
  return [d for d in yaml.safe_load_all(r.stdout) if d] if ok else []
 
-def one(docs,kind):return next(d for d in docs if (d['kind']==kind or (kind=='Deployment' and d['kind']=='StatefulSet')) and not (kind=='Service' and d['spec'].get('clusterIP')=='None'))
+def one(docs,kind):return next(d for d in docs if d['kind']==kind)
 for env in ['int','rec','prod']:
  front=render('httpd',env);back=render('springboot',env)
  for comp,docs in [('httpd',front),('springboot',back)]:
@@ -28,21 +28,24 @@ for env in ['int','rec','prod']:
    assert (root/f'charts/{comp}'/f).resolve().is_file()
  conf=one(front,'ConfigMap')['data']['httpd.conf']
  svc=one(back,'Service')
- stateful=one(back,'Deployment')
- assert stateful['kind']=='StatefulSet' and stateful['spec']['replicas']==2
+ assert one(back,'Deployment')['spec']['replicas']==2
  assert one(front,'Deployment')['spec']['replicas']==2
- headless=next(d for d in back if d['kind']=='Service' and d['spec'].get('clusterIP')=='None')
- assert stateful['spec']['serviceName']==headless['metadata']['name']
- assert headless['spec']['publishNotReadyAddresses'] is True
- for ordinal in (0,1):
-  assert f'http://{stateful["metadata"]["name"]}-{ordinal}.{headless["metadata"]["name"]}.{svc["metadata"]["namespace"]}.svc.cluster.local:8080" route=pod{ordinal}' in conf
- assert 'nofailover=Off' in conf and 'disablereuse=On' in conf
- assert 'HttpOnly; Secure; SameSite=Lax' in conf
- assert 'hcexpr=ready' in conf
- assert 'volumeClaimTemplates' not in stateful['spec']
+ assert not any(d['kind']=='StatefulSet' or d.get('spec',{}).get('clusterIP')=='None' for d in back)
+ route=one(back,'Route');fr=one(front,'Route')
+ assert route['spec']['to']['name']==svc['metadata']['name']
+ assert f'https://{route["spec"]["host"]}/' in conf
+ assert 'ProxyPreserveHost Off' in conf and 'SSLProxyVerify require' in conf
+ assert 'SSLProxyCheckPeerName On' in conf
+ assert f'RequestHeader set X-Forwarded-Host "{fr["spec"]["host"]}"' in conf
+ assert 'ProxyPassReverseCookieDomain' in conf
+ assert 'balancer://' not in conf and 'BalancerMember' not in conf
+ cookiekey='router.openshift.io/cookie_name'
+ assert fr['metadata']['annotations'][cookiekey]!=route['metadata']['annotations'][cookiekey]
+ assert route['metadata']['annotations']['haproxy.router.openshift.io/disable_cookies']=='false'
+ assert route['metadata']['labels']['ingress-scope']=='internal'
  peer=one(back,'NetworkPolicy')['spec']['ingress'][0]['from'][0]
- assert peer['namespaceSelector']['matchLabels']['kubernetes.io/metadata.name']==one(front,'Deployment')['metadata']['namespace']
- assert peer['podSelector']['matchLabels']==one(front,'Deployment')['spec']['template']['metadata']['labels']
+ assert peer['namespaceSelector']['matchLabels']['network.openshift.io/policy-group']=='ingress'
+ assert peer['podSelector']=={}
  assert 'initContainers' not in one(back,'Deployment')['spec']['template']['spec']
  assert 'appdynamics' not in str(front).lower()
  print(f'{env}: déploiements indépendants, Services, DNS, NetworkPolicies et Applications Argo CD OK')
@@ -63,11 +66,15 @@ render('httpd',extra={'port':80},ok=False)
 assert not any(x['kind'] in ('Route','NetworkPolicy') for x in render('httpd',extra={'route':{'enabled':False},'networkPolicy':{'enabled':False}}))
 print('Certificats + AppDynamics, absence par défaut et validation des erreurs: OK')
 
-plain=render('springboot',extra={'workloadKind':'Deployment'})
-assert one(plain,'Deployment')['kind']=='Deployment'
-assert not any(d['kind']=='Service' and d['spec'].get('clusterIP')=='None' for d in plain)
-plain=render('httpd',extra={'stickySession':{'enabled':False}})
-assert 'balancer://springboot' not in one(plain,'ConfigMap')['data']['httpd.conf']
-render('httpd',extra={'stickySession':{'cookieName':'bad;cookie'}},ok=False)
-render('httpd',extra={'stickySession':{'replicas':1}},ok=False)
-print('Sticky: 2x2 pods, routes individuelles, cookie, healthchecks et mode Deployment OK')
+render('springboot',extra={'workloadKind':'StatefulSet'},ok=False)
+render('httpd',extra={'stickySession':{'enabled':True}},ok=False)
+render('httpd',extra={'backendRoute':{'host':'monapp-int.apps.example.com'}},ok=False)
+render('springboot',extra={'route':{'cookieName':'bad;cookie'}},ok=False)
+ca=render('httpd',extra={'backendRoute':{'caSecretName':'router-ca','caSecretKey':'root.pem'}})
+spec=one(ca,'Deployment')['spec']['template']['spec']
+volume=next(v for v in spec['volumes'] if v['name']=='backend-route-ca')
+assert volume['secret']['secretName']=='router-ca'
+assert volume['secret']['items']==[{'key':'root.pem','path':'ca.crt'}]
+assert 'SSLProxyCACertificateFile /etc/backend-route-ca/ca.crt' in one(ca,'ConfigMap')['data']['httpd.conf']
+assert not any(d['kind']=='Route' for d in render('springboot',extra={'route':{'enabled':False}}))
+print('Routes frontend/backend, cookies distincts, TLS vérifié, CA montée, anciens paramètres rejetés: OK')

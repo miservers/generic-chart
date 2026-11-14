@@ -1,0 +1,25 @@
+{{- if .Values.route.enabled }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "app.name" . }}
+  namespace: {{ .Release.Namespace }}
+  {{- with .Values.route.labels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  annotations:
+    {{- $annotations := mergeOverwrite (deepCopy .Values.route.annotations) (dict "router.openshift.io/cookie_name" .Values.route.cookieName "haproxy.router.openshift.io/disable_cookies" "false") }}
+    {{- toYaml $annotations | nindent 4 }}
+spec:
+  host: {{ required "route.host requis" .Values.route.host | quote }}
+  to:
+    kind: Service
+    name: {{ include "app.name" . }}
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+{{- end }}

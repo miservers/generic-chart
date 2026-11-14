@@ -69,9 +69,14 @@ appdynamics:
       memory: 256Mi
 networkPolicy:
   enabled: true
-  frontendNamespace: monapp-front-int
-  frontendPodLabels:
-    app.kubernetes.io/name: monapp
-    app.kubernetes.io/instance: monapp-int-httpd
-    app.kubernetes.io/component: httpd
-workloadKind: Deployment
+  routerNamespaceSelector:
+    matchLabels:
+      network.openshift.io/policy-group: ingress
+route:
+  enabled: true
+  host: monapp-back-int.apps-internal.example.com
+  cookieName: MONAPP_INT_BACK
+  labels:
+    ingress-scope: internal
+  annotations:
+    haproxy.router.openshift.io/set-forwarded-headers: never

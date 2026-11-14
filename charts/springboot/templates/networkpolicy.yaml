@@ -12,11 +12,8 @@ spec:
   ingress:
     - from:
         - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.frontendNamespace | quote }}
-          podSelector:
-            matchLabels:
-              {{- toYaml .Values.networkPolicy.frontendPodLabels | nindent 14 }}
+            {{- toYaml .Values.networkPolicy.routerNamespaceSelector | nindent 12 }}
+          podSelector: {}
       ports:
         - {protocol: TCP, port: {{ .Values.port }}}
 {{- end }}

@@ -7,7 +7,8 @@ data:
   httpd.conf: |
     ServerRoot "/etc/httpd"
     Listen {{ .Values.port }}
-    ServerName {{ .Values.route.host | default "localhost" }}
+    ServerName https://{{ .Values.route.host }}:443
+    UseCanonicalName On
     PidFile /run/httpd/httpd.pid
     DefaultRuntimeDir /run/httpd
     LoadModule mpm_event_module modules/mod_mpm_event.so
@@ -17,51 +18,46 @@ data:
     LoadModule proxy_module modules/mod_proxy.so
     LoadModule proxy_http_module modules/mod_proxy_http.so
     LoadModule headers_module modules/mod_headers.so
-    {{- if .Values.stickySession.enabled }}
-    LoadModule slotmem_shm_module modules/mod_slotmem_shm.so
-    LoadModule proxy_balancer_module modules/mod_proxy_balancer.so
-    LoadModule lbmethod_byrequests_module modules/mod_lbmethod_byrequests.so
-    LoadModule watchdog_module modules/mod_watchdog.so
-    LoadModule proxy_hcheck_module modules/mod_proxy_hcheck.so
-    {{- end }}
+    LoadModule ssl_module modules/mod_ssl.so
     User apache
     Group apache
     ServerTokens Prod
     ServerSignature Off
     TraceEnable Off
     ErrorLog /proc/self/fd/2
-    LogFormat "%h %l %u %t \"%r\" %>s %b worker=%{BALANCER_WORKER_ROUTE}e" main
+    LogFormat "%h %l %u %t \"%r\" %>s %b" main
     CustomLog /proc/self/fd/1 main
     LogLevel warn
     <Directory />
       Require all denied
     </Directory>
     ProxyRequests Off
-    ProxyPreserveHost On
+    # Le Host ET le SNI doivent désigner la Route backend.
+    ProxyPreserveHost Off
+    ProxyAddHeaders Off
     ProxyTimeout {{ .Values.proxyTimeout }}
-    # Toutes les requêtes passent par la Route HTTPS edge (HTTP redirigé).
+    SSLProxyEngine On
+    SSLProxyVerify require
+    SSLProxyVerifyDepth 5
+    SSLProxyCheckPeerName On
+    SSLProxyCheckPeerExpire On
+    {{- if .Values.backendRoute.caSecretName }}
+    SSLProxyCACertificateFile /etc/backend-route-ca/ca.crt
+    {{- else }}
+    SSLProxyCACertificateFile /etc/pki/tls/certs/ca-bundle.crt
+    {{- end }}
+    # URL publique d'origine pour Spring Boot, indépendante du Host de routage.
     RequestHeader unset Forwarded
+    RequestHeader set X-Forwarded-Host "{{ .Values.route.host }}"
     RequestHeader set X-Forwarded-Proto "https"
     RequestHeader set X-Forwarded-Port "443"
     <Location "/">
       Require all granted
     </Location>
-    # Ne pas exposer les endpoints techniques via le frontal.
     <LocationMatch "^/actuator(?:/|$)">
       Require all denied
     </LocationMatch>
-    {{- if .Values.stickySession.enabled }}
-    ProxyHCExpr ready {%{REQUEST_STATUS} =~ /^2/}
-    <Proxy "balancer://springboot">
-      {{- range $i := until (int .Values.stickySession.replicas) }}
-      BalancerMember "http://{{ $.Values.stickySession.statefulSetName }}-{{ $i }}.{{ $.Values.stickySession.headlessServiceName }}.{{ $.Values.backend.namespace }}.svc.{{ $.Values.clusterDomain }}:{{ $.Values.stickySession.podPort }}" route=pod{{ $i }} connectiontimeout={{ $.Values.stickySession.connectionTimeout }} timeout={{ $.Values.proxyTimeout }} retry={{ $.Values.stickySession.retrySeconds }} disablereuse=On hcmethod=GET hcuri={{ $.Values.stickySession.healthCheckPath }} hcexpr=ready hcinterval={{ $.Values.stickySession.healthCheckInterval }} hcfails=1 hcpasses=1
-      {{- end }}
-      ProxySet lbmethod=byrequests stickysession={{ .Values.stickySession.cookieName }} nofailover=Off maxattempts={{ sub (int .Values.stickySession.replicas) 1 }} failontimeout=On
-    </Proxy>
-    Header always add Set-Cookie "{{ .Values.stickySession.cookieName }}=.%{BALANCER_WORKER_ROUTE}e; Path=/; HttpOnly; Secure; SameSite=Lax" env=BALANCER_ROUTE_CHANGED
-    ProxyPass "/" "balancer://springboot/"
-    ProxyPassReverse "/" "balancer://springboot/"
-    {{- else }}
-    ProxyPass "/" "http://{{ .Values.backend.serviceName }}.{{ .Values.backend.namespace }}.svc.{{ .Values.clusterDomain }}:{{ .Values.backend.port }}/" connectiontimeout=5 timeout={{ .Values.proxyTimeout }}
-    ProxyPassReverse "/" "http://{{ .Values.backend.serviceName }}.{{ .Values.backend.namespace }}.svc.{{ .Values.clusterDomain }}:{{ .Values.backend.port }}/"
-    {{- end }}
+    ProxyPass "/" "https://{{ .Values.backendRoute.host }}/" connectiontimeout=5 timeout={{ .Values.proxyTimeout }}
+    ProxyPassReverse "/" "https://{{ .Values.backendRoute.host }}/"
+    # Cookies host-only transmis tels quels ; Domain explicite réécrit si nécessaire.
+    ProxyPassReverseCookieDomain "{{ .Values.backendRoute.host }}" "{{ .Values.route.host }}"
