@@ -104,9 +104,8 @@
         },
         "host": {
           "type": "string",
-          "minLength": 1,
           "maxLength": 253,
-          "pattern": "^[a-z0-9]+([.-][a-z0-9]+)*$"
+          "pattern": "^$|^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$"
         },
         "cookieName": {
           "type": "string",
@@ -132,6 +131,21 @@
         "enabled",
         "disabled"
       ]
+    },
+    "environment": {
+      "type": "string",
+      "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    },
+    "baseDomain": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$",
+      "minLength": 1
+    },
+    "clusterName": {
+      "type": "string",
+      "maxLength": 63,
+      "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
     }
   },
   "not": {

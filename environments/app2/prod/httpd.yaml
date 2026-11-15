@@ -1,0 +1,5 @@
+# Nom de cluster injecte par l’ApplicationSet ; domaine fixe dans le chart.
+appName: app2
+replicas: 2
+route:
+  cookieName: APP2_PROD_FRONT

@@ -1,0 +1,8 @@
+# Nom de cluster injecte par l’ApplicationSet ; domaine fixe dans le chart.
+appName: app1
+replicas: 2
+image: registry.example.com/equipe/app1:1.0.0
+route:
+  cookieName: APP1_PROD_BACK
+  labels:
+    ingress-scope: internal

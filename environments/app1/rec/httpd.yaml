@@ -1,8 +1,5 @@
-# Exemple : adapter domaines et images à votre plateforme.
+# Nom de cluster injecte par l’ApplicationSet ; domaine fixe dans le chart.
 appName: app1
 replicas: 2
 route:
-  host: app1-rec-prez-app1-recfr.apps.example.com
   cookieName: APP1_REC_FRONT
-backendRoute:
-  host: app1-rec-app-app1-rec.apps-internal.example.com

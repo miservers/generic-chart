@@ -1,0 +1,60 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: applications-metier
+  # Namespace de l’entite, a autoriser dans Argo CD et les AppProjects.
+  namespace: gitops-metier
+spec:
+  goTemplate: true
+  goTemplateOptions: [missingkey=error]
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+                # Seul emplacement de declaration du nom de cluster.
+                - clusterName: hors-prod
+                  apps: [app1, app2]
+                  envs: [int, rec]
+                  components: [httpd, springboot]
+          - list:
+              elementsYaml: |
+                {{- range $app := .apps }}
+                {{- range $env := $.envs }}
+                {{- range $component := $.components }}
+                - app: {{ $app | quote }}
+                  env: {{ $env | quote }}
+                  component: {{ $component | quote }}
+                {{- end }}
+                {{- end }}
+                {{- end }}
+  template:
+    metadata:
+      name: '{{ .app }}-{{ .env }}-{{ if eq .component "httpd" }}prez{{ else }}app{{ end }}'
+      labels:
+        deployment.example.com/cluster: '{{ .clusterName }}'
+    spec:
+      project: applications-metier
+      source:
+        repoURL: https://github.com/miservers/generic-chart.git
+        targetRevision: main
+        path: 'charts/{{ .component }}'
+        helm:
+          releaseName: '{{ .app }}-{{ .env }}-{{ if eq .component "httpd" }}prez{{ else }}app{{ end }}'
+          valueFiles:
+            - '../../environments/{{ .app }}/{{ .env }}/{{ .component }}.yaml'
+          parameters:
+            - name: appName
+              value: '{{ .app }}'
+            - name: environment
+              value: '{{ .env }}'
+            - name: clusterName
+              value: '{{ .clusterName }}'
+            - name: replicas
+              value: "2"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{ .app }}-{{ .env }}{{ if eq .component "httpd" }}fr{{ end }}'
+      syncPolicy:
+        syncOptions:
+          - FailOnSharedResource=true

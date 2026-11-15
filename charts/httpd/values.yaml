@@ -1,6 +1,11 @@
 # Affinite du routeur : enabled ou disabled (independante pour chaque chart).
 session: enabled
 appName: monapp
+# Injectes par Application.spec.source.helm.parameters.
+clusterName: ""
+# Domaine fixe de l’organisation : remplacer cet exemple dans les deux charts.
+baseDomain: example.com
+environment: ""
 fullnameOverride: ''
 imagePullSecrets: []
 image: registry.access.redhat.com/hi/httpd:latest
@@ -17,7 +22,7 @@ resources:
     memory: 256Mi
 route:
   enabled: true
-  host: monapp-int.apps.example.com
+  host: ""
   cookieName: MONAPP_INT_FRONT
   labels: {}
   annotations:
@@ -28,6 +33,6 @@ networkPolicy:
     matchLabels:
       network.openshift.io/policy-group: ingress
 backendRoute:
-  host: monapp-back-int.apps-internal.example.com
+  host: ""
   caSecretName: ''
   caSecretKey: ca.crt

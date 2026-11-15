@@ -1,9 +1,8 @@
-# Exemple : adapter domaines et images à votre plateforme.
+# Nom de cluster injecte par l’ApplicationSet ; domaine fixe dans le chart.
 appName: app1
 replicas: 2
 image: registry.example.com/equipe/app1:1.0.0
 route:
-  host: app1-rec-app-app1-rec.apps-internal.example.com
   cookieName: APP1_REC_BACK
   labels:
     ingress-scope: internal

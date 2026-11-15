@@ -70,13 +70,13 @@ route:
     ingress-scope: internal
 ```
 
-Les deux valeurs `httpd.backendRoute.host` et `springboot.route.host` doivent être identiques. Les noms de Route frontend et backend doivent être différents, sinon HTTPD bouclerait vers lui-même. Les hosts sont explicites pour conserver l'indépendance des Applications Argo CD.
+Les deux valeurs `httpd.backendRoute.host` et `springboot.route.host` doivent être identiques. Les noms de Route frontend et backend doivent être différents, sinon HTTPD bouclerait vers lui-même. Ces anciens exemples monapp utilisent des hosts explicites ; les nouveaux ApplicationSets utilisent le nom de cluster injecté (voir ci-dessous).
 
 La cible est toujours `https://HOST_BACKEND/`, port 443. HTTPD utilise `ProxyPreserveHost Off` : le Host et le SNI correspondent à la Route backend, ce qui permet son routage et la vérification TLS. Il définit `X-Forwarded-Host` sur le domaine public, `X-Forwarded-Proto=https` et `X-Forwarded-Port=443` pour Spring Boot, et supprime un éventuel header `Forwarded` reçu. `ProxyAddHeaders Off` évite d'ajouter une autre valeur de Host transmis. Spring Boot conserve `SERVER_FORWARD_HEADERS_STRATEGY=framework` dans les valeurs par défaut.
 
 `ProxyPassReverse` traduit les redirections HTTP vers le domaine public. `ServerName https://HOST_PUBLIC:443` et `UseCanonicalName On` évitent de produire des redirections en HTTP à cause du saut edge → HTTPD. Apache peut avertir au démarrage qu'un ServerName HTTPS est associé à un listener HTTP : ici TLS entrant est terminé par le routeur, c'est volontaire. Aucun chiffrement entrant n'est activé dans HTTPD.
 
-L'annotation `haproxy.router.openshift.io/set-forwarded-headers` vaut `replace` côté frontend et `never` côté backend, afin de ne pas reconstruire la chaîne Forwarded/X-Forwarded-For sur le second saut. Cette annotation n'est pas une garantie générale sur tous les headers : vérifier le comportement de votre IngressController, notamment `X-Forwarded-Host`, avec l'application. Ne pas utiliser une adresse fournie dans X-Forwarded-For comme preuve d'identité sans politique de confiance adaptée.
+Les valeurs historiques `route.annotations` contiennent `set-forwarded-headers`, mais ce bloc n’est plus rendu depuis la simplification des annotations de session. La politique du routeur s’applique donc sans ces surcharges. Cette annotation n'est pas une garantie générale sur tous les headers : vérifier le comportement de votre IngressController, notamment `X-Forwarded-Host`, avec l'application. Ne pas utiliser une adresse fournie dans X-Forwarded-For comme preuve d'identité sans politique de confiance adaptée.
 
 ## TLS de la Route backend
 
@@ -113,46 +113,59 @@ oc get route -n monapp-back-int monapp-int-springboot -o yaml
 # Contrôler status.ingress : routerName, conditions Admitted et hostname.
 ```
 
-## ApplicationSet app1 / app2 — INT et REC
+## ApplicationSets par cluster — app1 / app2
 
-`argocd/applicationsets/applications-metier.yaml` génère huit Applications pour un seul cluster sélectionné. Chaque application métier déclare `envs: [int, rec]` et `components: [httpd, springboot]`. `elementsYaml` développe ces tableaux, puis Matrix associe le cluster.
+Chaque instance Argo CD déploie uniquement sur son cluster local : `destination.server: https://kubernetes.default.svc`. Aucun générateur `clusters`, Secret de cluster ou nom de cluster enregistré dans Argo CD n’est nécessaire.
 
-| Application | Namespace |
-|---|---|
-| app1-int-app | app1-int |
-| app1-int-prez | app1-intfr |
-| app1-rec-app | app1-rec |
-| app1-rec-prez | app1-recfr |
-| app2-int-app | app2-int |
-| app2-int-prez | app2-intfr |
-| app2-rec-app | app2-rec |
-| app2-rec-prez | app2-recfr |
+| Fichier | Environnements | Applications |
+|---|---|---|
+| `argocd/clusters/hors-prod/applicationset.yaml` | int, rec | 8 |
+| `argocd/clusters/prod-a/applicationset.yaml` | prod | 4 |
+| `argocd/clusters/prod-b/applicationset.yaml` | prod | 4 |
 
-Les huit fichiers `environments/{app1,app2}/{int,rec}/{httpd,springboot}.yaml` sont fournis. Leurs images et domaines `example.com` sont des exemples à adapter ; les hosts frontend/backend sont explicitement renseignés, conformément à la version actuelle des charts. L'ApplicationSet ne découvre pas le domaine Ingress. Les noms Helm de release suivent les noms des Applications (`-app` et `-prez`).
+Dans chaque fichier, le premier générateur List contient un seul élément avec `clusterName`, `apps`, `envs` et `components`. Le nom du cluster est déclaré une seule fois ; aucun domaine n’est fourni dans l’ApplicationSet. Le deuxième List développe les trois listes avec `elementsYaml` ; Matrix associe les constantes du cluster à chaque combinaison.
 
-Faire gérer le répertoire `argocd/applicationsets` par votre Application parente App of Apps, ou créer cet ApplicationSet depuis Argo CD. L'Application parente doit être autorisée à gérer ce type de ressource dans `openshift-gitops`. Le contrôleur ApplicationSet doit être installé et autorisé à traiter cet objet.
+- `clusterName` vaut ici `hors-prod`, `prod-a` ou `prod-b`. Ce nom doit correspondre au segment cluster de votre convention DNS. Ce n’est pas une valeur découverte ni nécessairement le nom enregistré dans Argo CD ; il ne sélectionne pas la destination.
+- Le label `deployment.example.com/cluster` identifie le cluster sur chaque objet Application. Le préfixe de label est un exemple organisationnel à adapter.
+- `clusterName` est transmis via `spec.source.helm.parameters`, avec `environment` et `appName`. Le domaine fixe `baseDomain: example.com` est configuré dans les valeurs par défaut des deux charts : remplacer cet exemple par votre domaine organisationnel, identique pour tous les clusters. Aucun domaine n’est transmis par l’ApplicationSet.
+- Aucun domaine n’est recopié dans `environments/app1` ou `environments/app2`. Les mêmes valeurs PROD sont réutilisées sur les deux clusters de production.
 
-Le Secret représentant **un seul cluster cible dans Argo CD** doit porter `deploy-applications-metier: "true"`. Aucun cluster sélectionné ne produit d'Application ; plusieurs clusters créeraient des noms en collision. Le cluster local doit également avoir un Secret de cluster pour cette sélection par label. Les namespaces doivent exister et être accessibles au contrôleur ; l'AppProject doit autoriser le dépôt et les destinations.
+Les conventions sont conservées : Application et release `<app>-<env>-app` dans `<app>-<env>` ; Application et release `<app>-<env>-prez` dans `<app>-<env>fr`. Les noms identiques en PROD ne se heurtent pas, car ils sont gérés par deux instances Argo CD sur deux clusters différents.
 
-La synchronisation des huit Applications est manuelle. Les anciens exemples individuels `monapp` sont conservés et indépendants ; ne pas les importer si vous ne voulez déployer que app1/app2. Pour une migration d'Applications existantes vers ApplicationSet, contrôler leurs noms et propriétaires avant activation.
+### Hostnames attendus
 
-Références : [List / elementsYaml](https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/Generators-List/) et [Matrix](https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/Generators-Matrix/).
+Quand `route.host` est vide, le chart construit `<nom-route>-<namespace>.apps.<clusterName>.<baseDomain>` et renseigne ce hostname explicitement dans `Route.spec.host`. HTTPD construit la cible backend `<app>-<env>-app-<app>-<env>.apps.<clusterName>.<baseDomain>`.
 
-## Installation Argo CD
+**Ces hostnames sont calculés selon une convention ; ils ne sont jamais lus sur une Route existante.** Le DNS, le certificat et l’admission de ces hosts par les IngressControllers restent à vérifier sur la plateforme. Si le routeur backend interne utilise un autre domaine, cette hypothèse de domaine commun doit être adaptée avant déploiement.
 
-1. Adapter les domaines, images et namespaces des fichiers d'environnement. Fixer les images par digest approuvé en production ; `latest` HTTPD reste une valeur illustrative.
-2. Faire préparer les deux namespaces, les droits du contrôleur Argo CD et la Route interne par l'équipe plateforme. Aucun namespace ou droit cluster n'est créé par ces charts.
-3. Configurer l'accès en lecture au dépôt privé `https://github.com/miservers/generic-chart.git`. Choisir un AppProject autorisant ce dépôt et les destinations (`default` dans les exemples).
-4. Committer les paramètres, puis créer les Applications :
+`route.host` et `backendRoute.host` restent des surcharges explicites facultatives pour les usages historiques. En cas de `fullnameOverride` backend ou de convention différente, fournir aussi le `backendRoute.host` correspondant côté HTTPD. Le nom du cluster doit être transmis même lorsque la Route frontend est désactivée, car HTTPD utilise le hostname public dans sa configuration.
+
+### Installation par Argo CD
+
+Les nouveaux ApplicationSets résident dans le namespace d’entité d’exemple `gitops-metier`, avec l’AppProject `applications-metier`, pour ne pas placer les Applications dans le namespace central. Ces deux noms sont à adapter à l’organisation existante. Le namespace source doit être autorisé par Argo CD, le contrôleur ApplicationSet et les `sourceNamespaces` des AppProjects ; les destinations et le dépôt doivent aussi être autorisés. Aucun namespace, AppProject ou RBAC n’est créé ici.
+
+L’équipe plateforme installe, via son processus GitOps autorisé, uniquement le fichier `argocd/clusters/<cluster>/applicationset.yaml` correspondant à l’instance locale. Ne pas importer récursivement les trois répertoires dans une même instance : les ApplicationSets portent le même nom et les Applications PROD entreraient en collision.
+
+L’ancien `argocd/applicationsets/applications-metier.yaml` est remplacé par ces trois fichiers. S’il existe déjà dans un cluster, organiser la migration de ses propriétaires avant de le supprimer : une suppression en cascade pourrait supprimer les Applications et ressources gérées. Aucun changement n’a été exécuté sur un cluster.
+
+La synchronisation des Applications générées reste manuelle. Les anciens exemples individuels `monapp` restent indépendants et conservent leurs hosts explicites ; ils ne sont pas générés par ces ApplicationSets.
+
+Les fichiers restent sur la copie locale tant qu’ils ne sont pas commités : une Application qui suit `main` ne verra pas ces changements avant publication explicite.
+
+### Vérification locale reproductible
+
+Prérequis : Helm 3, compilateur Go et Python avec PyYAML.
 
 ```sh
-oc apply -f argocd/springboot/monapp-int.yaml
-oc apply -f argocd/httpd/monapp-int.yaml
+python3 tests/render_clusters.py --output /tmp/generic-chart-rendered
+python3 verify.py
 ```
 
-INT et REC utilisent auto-sync ; PROD reste manuel. Les Applications ont des cycles indépendants : vérifier la disponibilité du backend et l'admission de sa Route avant de synchroniser HTTPD évite les erreurs initiales. Avec OpenShift GitOps Operator, la délégation via `argocd.argoproj.io/managed-by=openshift-gitops` relève de l'équipe plateforme et attribue des droits au contrôleur.
+Le premier script développe les chaînes Go template avec `text/template` (fonction `quote` pour les chaînes utilisées ici), combine les deux List, puis exécute `helm lint` et `helm template` avec le namespace, la release, les fichiers et paramètres de **chacune des 16 Applications**. Il contrôle les noms, labels, destinations locales et la concordance du proxy HTTPD avec la Route backend. Les Applications développées, manifests Helm et résultats de lint sont enregistrés dans le répertoire de sortie.
 
-Pour une nouvelle application, dupliquer les fichiers d'environnement et les deux Applications, changer `appName`, les releaseNames, namespaces, hosts, noms de cookies et images. Conserver les chemins `charts/httpd` et `charts/springboot`. Garder les labels de sélection stables lors des mises à jour des Deployments.
+Ce contrôle hors ligne ne lance pas le contrôleur ApplicationSet. Il ne valide pas les CRD de votre version, les RBAC, les AppProjects, l’admission des Routes, le DNS, TLS, les NetworkPolicies ni l’affinité sur un vrai cluster. Les images applicatives restent des exemples à remplacer.
+
+Références officielles : [List / elementsYaml](https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/Generators-List/), [Matrix](https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/Generators-Matrix/), [paramètres Helm](https://argo-cd.readthedocs.io/en/stable/user-guide/helm/#helm-parameters), [ApplicationSet hors namespace central](https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/Appset-Any-Namespace/).
 
 ## Spécifiques Spring Boot conservés
 

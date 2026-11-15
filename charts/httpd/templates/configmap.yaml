@@ -7,7 +7,7 @@ data:
   httpd.conf: |
     ServerRoot "/etc/httpd"
     Listen {{ .Values.port }}
-    ServerName https://{{ .Values.route.host }}:443
+    ServerName https://{{ include "app.routeHost" . }}:443
     UseCanonicalName On
     PidFile /run/httpd/httpd.pid
     DefaultRuntimeDir /run/httpd
@@ -48,7 +48,7 @@ data:
     {{- end }}
     # URL publique d'origine pour Spring Boot, indépendante du Host de routage.
     RequestHeader unset Forwarded
-    RequestHeader set X-Forwarded-Host "{{ .Values.route.host }}"
+    RequestHeader set X-Forwarded-Host "{{ include "app.routeHost" . }}"
     RequestHeader set X-Forwarded-Proto "https"
     RequestHeader set X-Forwarded-Port "443"
     <Location "/">
@@ -57,7 +57,7 @@ data:
     <LocationMatch "^/actuator(?:/|$)">
       Require all denied
     </LocationMatch>
-    ProxyPass "/" "https://{{ .Values.backendRoute.host }}/" connectiontimeout=5 timeout={{ .Values.proxyTimeout }}
-    ProxyPassReverse "/" "https://{{ .Values.backendRoute.host }}/"
+    ProxyPass "/" "https://{{ include "app.backendHost" . }}/" connectiontimeout=5 timeout={{ .Values.proxyTimeout }}
+    ProxyPassReverse "/" "https://{{ include "app.backendHost" . }}/"
     # Cookies host-only transmis tels quels ; Domain explicite réécrit si nécessaire.
-    ProxyPassReverseCookieDomain "{{ .Values.backendRoute.host }}" "{{ .Values.route.host }}"
+    ProxyPassReverseCookieDomain "{{ include "app.backendHost" . }}" "{{ include "app.routeHost" . }}"
