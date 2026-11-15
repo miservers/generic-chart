@@ -103,7 +103,20 @@ Un routeur interne limite l'exposition réseau, mais ne signifie pas automatique
 
 Les NetworkPolicies d'entrée des deux charts autorisent désormais les pods du routeur, sélectionnés par `networkPolicy.routerNamespaceSelector`, sur le port applicatif. Le sélecteur par défaut utilise `network.openshift.io/policy-group: ingress` et un `podSelector: {}`. Adapter ce sélecteur si votre routeur interne utilise une autre topologie. La policy backend n'autorise plus directement HTTPD. Les policies sont additives : une règle préexistante permissive reste effective.
 
-Les charts ne filtrent pas les sorties. Avec un deny egress existant, autoriser DNS et HTTPD → adresse/port HTTPS du routeur, selon le chemin réel (Service, VIP, SNAT, hostNetwork), ainsi que les sorties Java requises vers DB, RabbitMQ, AppDynamics ou proxy. La policy backend voit la provenance du routeur, pas celle du pod HTTPD d'origine ; elle ne suffit donc pas à prouver que le client est passé par le frontal.
+Le chart HTTPD propose un filtrage Egress optionnel, desactive par defaut. Les valeurs sont communes aux applications et separent les environnements :
+
+- `environments/network/hors-prod/int.yaml`
+- `environments/network/hors-prod/rec.yaml`
+- `environments/network/prod-a/prod.yaml`
+- `environments/network/prod-b/prod.yaml`
+
+Les ApplicationSets chargent ce fichier avant les valeurs de l’application ; une surcharge specifique reste donc possible. Le fichier est egalement charge pour Spring Boot mais ses champs `networkPolicy.egress` n’y sont pas utilises : le chart backend reste inchange.
+
+Le trajet est HTTPD → VIP F5:443 → routeur OpenShift → Spring Boot. Renseigner `networkPolicy.egress.backendRouteIPs` avec les IPv4 des VIP F5 reelles atteintes via le hostname de la Route backend, puis `dnsIPs` et `dnsPort` selon le chemin DNS du cluster, et activer `egress.enabled`. Les adresses n’incluent pas `/32` : le template l’ajoute. Cette version attend des IPv4 uniquement. Le port DNS par defaut est 53 ; un chemin vers les pods DNS OpenShift peut necessiter 5353. Les IP de Service, la traduction d’adresses et les routeurs hostNetwork doivent etre valides avec l’equipe plateforme.
+
+Quand active, HTTPD autorise TCP/443 vers les VIP F5 de la Route backend et UDP/TCP vers les IP/port DNS. Les autres nouvelles connexions sortantes sont isolees sauf si une autre NetworkPolicy les autorise ; les politiques de plateforme peuvent aussi imposer leurs restrictions. La policy ne filtre pas les hostnames HTTP : toutes les Routes accessibles via les IP autorisees restent potentiellement joignables. HTTPD conserve le hostname dans ProxyPass pour Host/SNI/TLS. L’activation avec une liste de VIP backend ou DNS vide est refusee au rendu Helm.
+
+Les sorties Spring Boot ne sont pas filtrees par ces nouveaux parametres. Les regles Ingress existantes restent inchangees.
 
 Pour vérifier l'admission des Routes :
 
@@ -159,6 +172,7 @@ Prérequis : Helm 3, compilateur Go et Python avec PyYAML.
 ```sh
 python3 tests/render_clusters.py --output /tmp/generic-chart-rendered
 python3 verify.py
+python3 tests/verify_httpd_egress.py
 ```
 
 Le premier script développe les chaînes Go template avec `text/template` (fonction `quote` pour les chaînes utilisées ici), combine les deux List, puis exécute `helm lint` et `helm template` avec le namespace, la release, les fichiers et paramètres de **chacune des 16 Applications**. Il contrôle les noms, labels, destinations locales et la concordance du proxy HTTPD avec la Route backend. Les Applications développées, manifests Helm et résultats de lint sont enregistrés dans le répertoire de sortie.

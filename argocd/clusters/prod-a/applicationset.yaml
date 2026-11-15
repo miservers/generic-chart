@@ -42,6 +42,7 @@ spec:
         helm:
           releaseName: '{{ .app }}-{{ .env }}-{{ if eq .component "httpd" }}prez{{ else }}app{{ end }}'
           valueFiles:
+            - '../../environments/network/{{ .clusterName }}/{{ .env }}.yaml'
             - '../../environments/{{ .app }}/{{ .env }}/{{ .component }}.yaml'
           parameters:
             - name: appName

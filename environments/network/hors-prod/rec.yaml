@@ -1,0 +1,12 @@
+# HTTPD : sorties pour hors-prod / rec. Valeurs communes a app1 et app2.
+# Renseigner les IP reelles avant de mettre enabled a true.
+networkPolicy:
+  egress:
+    enabled: false
+    backendRouteIPs: []
+    # Exemple de syntaxe (IP fictives, ne pas activer telles quelles) :
+    # backendRouteIPs:
+    #   - "192.0.2.11"
+    #   - "192.0.2.12"
+    dnsIPs: []
+    dnsPort: 53

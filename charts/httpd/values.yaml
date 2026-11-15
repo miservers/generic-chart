@@ -29,6 +29,13 @@ route:
     haproxy.router.openshift.io/set-forwarded-headers: replace
 networkPolicy:
   enabled: true
+  egress:
+    enabled: false
+    # IPv4 des VIP F5 jointes par HTTPD pour la Route backend, sans /32.
+    backendRouteIPs: []
+    # IPv4 DNS et port tels que vus par la NetworkPolicy (a valider sur le cluster).
+    dnsIPs: []
+    dnsPort: 53
   routerNamespaceSelector:
     matchLabels:
       network.openshift.io/policy-group: ingress
