@@ -1,6 +1,6 @@
 # Affinite du routeur : enabled ou disabled (independante pour chaque chart).
 session: enabled
-appName: monapp
+appName: ""  # Requis : fourni par l’Application ou les valeurs d’environnement.
 # Injectes par Application.spec.source.helm.parameters.
 clusterName: ""
 # Domaine fixe de l’organisation : remplacer cet exemple dans les deux charts.
@@ -82,7 +82,7 @@ networkPolicy:
 route:
   enabled: true
   host: ""
-  cookieName: MONAPP_INT_BACK
+  cookieName: ""  # Requis si route.enabled et session=enabled.
   labels:
     ingress-scope: internal
   annotations:

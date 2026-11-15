@@ -1,3 +1,6 @@
+{{- if and .Values.route.enabled (eq .Values.session "enabled") (not .Values.route.cookieName) -}}
+{{- fail "route.cookieName est requis lorsque route.enabled=true et session=enabled" -}}
+{{- end -}}
 {{- $names := dict "tmp" true "appdynamics" true -}}
 {{- range .Values.certificates -}}
 {{- if hasKey $names .name -}}{{- fail (printf "Volume réservé ou dupliqué: %s" .name) -}}{{- end -}}

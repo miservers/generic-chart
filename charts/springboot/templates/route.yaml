@@ -16,7 +16,9 @@ metadata:
     haproxy.router.openshift.io/disable_cookies: "true"
     {{- end }}
 spec:
-  host: {{ include "app.routeHost" . | quote }}
+  {{- with .Values.route.host }}
+  host: {{ . | quote }}
+  {{- end }}
   to:
     kind: Service
     name: {{ include "app.name" . }}

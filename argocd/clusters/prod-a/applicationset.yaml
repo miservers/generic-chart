@@ -25,12 +25,14 @@ spec:
                 - app: {{ $app | quote }}
                   env: {{ $env | quote }}
                   component: {{ $component | quote }}
+                  suffix: {{ if eq $component "httpd" }}prez{{ else }}app{{ end }}
+                  nsSuffix: {{ if eq $component "httpd" }}fr{{ else }}""{{ end }}
                 {{- end }}
                 {{- end }}
                 {{- end }}
   template:
     metadata:
-      name: '{{ .app }}-{{ .env }}-{{ if eq .component "httpd" }}prez{{ else }}app{{ end }}'
+      name: '{{ .app }}-{{ .env }}-{{ .suffix }}'
       labels:
         deployment.example.com/cluster: '{{ .clusterName }}'
     spec:
@@ -40,7 +42,7 @@ spec:
         targetRevision: main
         path: 'charts/{{ .component }}'
         helm:
-          releaseName: '{{ .app }}-{{ .env }}-{{ if eq .component "httpd" }}prez{{ else }}app{{ end }}'
+          releaseName: '{{ .app }}-{{ .env }}-{{ .suffix }}'
           valueFiles:
             - '../../environments/network/{{ .clusterName }}/{{ .env }}.yaml'
             - '../../environments/{{ .app }}/{{ .env }}/{{ .component }}.yaml'
@@ -55,7 +57,7 @@ spec:
               value: "2"
       destination:
         server: https://kubernetes.default.svc
-        namespace: '{{ .app }}-{{ .env }}{{ if eq .component "httpd" }}fr{{ end }}'
+        namespace: '{{ .app }}-{{ .env }}{{ .nsSuffix }}'
       syncPolicy:
         syncOptions:
           - FailOnSharedResource=true

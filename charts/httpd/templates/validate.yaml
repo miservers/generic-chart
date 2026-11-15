@@ -1,3 +1,6 @@
+{{- if and .Values.route.enabled (eq .Values.session "enabled") (not .Values.route.cookieName) -}}
+{{- fail "route.cookieName est requis lorsque route.enabled=true et session=enabled" -}}
+{{- end -}}
 {{- if eq (include "app.routeHost" .) (include "app.backendHost" .) -}}
 {{- fail "Les hosts frontend et backend doivent être différents (boucle proxy)" -}}
 {{- end -}}

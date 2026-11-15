@@ -4,7 +4,7 @@ import subprocess
 import yaml
 
 root=Path(__file__).resolve().parents[1]
-base=['helm','template','app1-int-prez',str(root/'charts/httpd'),'--namespace','app1-intfr','--set','clusterName=hors-prod,environment=int,appName=app1']
+base=['helm','template','app1-int-prez',str(root/'charts/httpd'),'--namespace','app1-intfr','--set','clusterName=hors-prod,environment=int,appName=app1,route.cookieName=APP1_INT_FRONT']
 
 def render(egress, ok=True):
     result=subprocess.run(base+['-f','-'],input=yaml.safe_dump({'networkPolicy':{'egress':egress}}),capture_output=True,text=True)

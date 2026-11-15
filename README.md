@@ -1,5 +1,7 @@
 # HTTPD + Spring Boot : deux charts et affinité par Route OpenShift
 
+`appName` est requis et sans valeur metier par defaut. `route.cookieName` est requis uniquement si `route.enabled: true` et `session: enabled`. Les fichiers d’environnement fournissent ces valeurs ; utiliser des noms de cookies distincts pour frontend et backend.
+
 ## Activation de l’affinité de session
 
 Chaque chart accepte `session: enabled` (valeur par défaut) ou `session: disabled`, dans ses valeurs Helm ou les paramètres de son Application Argo CD. Le frontend et le backend sont configurables indépendamment.
@@ -136,7 +138,7 @@ Chaque instance Argo CD déploie uniquement sur son cluster local : `destination
 | `argocd/clusters/prod-a/applicationset.yaml` | prod | 4 |
 | `argocd/clusters/prod-b/applicationset.yaml` | prod | 4 |
 
-Dans chaque fichier, le premier générateur List contient un seul élément avec `clusterName`, `apps`, `envs` et `components`. Le nom du cluster est déclaré une seule fois ; aucun domaine n’est fourni dans l’ApplicationSet. Le deuxième List développe les trois listes avec `elementsYaml` ; Matrix associe les constantes du cluster à chaque combinaison.
+Dans chaque fichier, le premier générateur List contient un seul élément avec `clusterName`, `apps`, `envs` et `components`. Le nom du cluster est déclaré une seule fois ; aucun domaine n’est fourni dans l’ApplicationSet. Le deuxième List développe les trois listes avec `elementsYaml` et calcule une seule fois `suffix` (prez/app) et `nsSuffix` (fr/vide) ; Matrix associe les constantes du cluster à chaque combinaison.
 
 - `clusterName` vaut ici `hors-prod`, `prod-a` ou `prod-b`. Ce nom doit correspondre au segment cluster de votre convention DNS. Ce n’est pas une valeur découverte ni nécessairement le nom enregistré dans Argo CD ; il ne sélectionne pas la destination.
 - Le label `deployment.example.com/cluster` identifie le cluster sur chaque objet Application. Le préfixe de label est un exemple organisationnel à adapter.
@@ -147,9 +149,9 @@ Les conventions sont conservées : Application et release `<app>-<env>-app` dans
 
 ### Hostnames attendus
 
-Quand `route.host` est vide, le chart construit `<nom-route>-<namespace>.apps.<clusterName>.<baseDomain>` et renseigne ce hostname explicitement dans `Route.spec.host`. HTTPD construit la cible backend `<app>-<env>-app-<app>-<env>.apps.<clusterName>.<baseDomain>`.
+Quand `route.host` est vide, le chart Spring Boot omet `spec.host` : OpenShift attribue le hostname backend. Le chart HTTPD continue de renseigner le host frontend et de construire sa cible backend attendue `<app>-<env>-app-<app>-<env>.apps.<clusterName>.<baseDomain>`. Une valeur explicite de `route.host` reste prioritaire dans les deux charts.
 
-**Ces hostnames sont calculés selon une convention ; ils ne sont jamais lus sur une Route existante.** Le DNS, le certificat et l’admission de ces hosts par les IngressControllers restent à vérifier sur la plateforme. Si le routeur backend interne utilise un autre domaine, cette hypothèse de domaine commun doit être adaptée avant déploiement.
+**Le hostname backend dans HTTPD est attendu, pas lu sur la Route.** Le domaine utilise par OpenShift (y compris un eventuel `appsDomain`) doit correspondre a cette convention. Comparer le `spec.host` attribue, visible dans la console OpenShift, a la cible de HTTPD. En cas d’ecart, corriger la configuration avant utilisation ; Helm ne peut pas prouver cette correspondance hors ligne. Le DNS, le certificat et l’admission de ces hosts par les IngressControllers restent à vérifier sur la plateforme. Si le routeur backend interne utilise un autre domaine, cette hypothèse de domaine commun doit être adaptée avant déploiement.
 
 `route.host` et `backendRoute.host` restent des surcharges explicites facultatives pour les usages historiques. En cas de `fullnameOverride` backend ou de convention différente, fournir aussi le `backendRoute.host` correspondant côté HTTPD. Le nom du cluster doit être transmis même lorsque la Route frontend est désactivée, car HTTPD utilise le hostname public dans sa configuration.
 
@@ -173,9 +175,10 @@ Prérequis : Helm 3, compilateur Go et Python avec PyYAML.
 python3 tests/render_clusters.py --output /tmp/generic-chart-rendered
 python3 verify.py
 python3 tests/verify_httpd_egress.py
+python3 tests/verify_route_options.py
 ```
 
-Le premier script développe les chaînes Go template avec `text/template` (fonction `quote` pour les chaînes utilisées ici), combine les deux List, puis exécute `helm lint` et `helm template` avec le namespace, la release, les fichiers et paramètres de **chacune des 16 Applications**. Il contrôle les noms, labels, destinations locales et la concordance du proxy HTTPD avec la Route backend. Les Applications développées, manifests Helm et résultats de lint sont enregistrés dans le répertoire de sortie.
+Le premier script développe les chaînes Go template avec `text/template` (fonction `quote` pour les chaînes utilisées ici), combine les deux List, puis exécute `helm lint` et `helm template` avec le namespace, la release, les fichiers et paramètres de **chacune des 16 Applications**. Il contrôle les noms, labels, destinations locales, l’absence de spec.host backend et le hostname attendu dans HTTPD ; il ne compare pas ce dernier a un hostname reel attribue par OpenShift. Les Applications développées, manifests Helm et résultats de lint sont enregistrés dans le répertoire de sortie.
 
 Ce contrôle hors ligne ne lance pas le contrôleur ApplicationSet. Il ne valide pas les CRD de votre version, les RBAC, les AppProjects, l’admission des Routes, le DNS, TLS, les NetworkPolicies ni l’affinité sur un vrai cluster. Les images applicatives restent des exemples à remplacer.
 

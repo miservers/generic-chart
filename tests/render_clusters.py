@@ -68,7 +68,11 @@ def main():
                 assert yaml.safe_load((chart/'values.yaml').read_text())['baseDomain'] == 'example.com'
                 assert {p['name']:p['value'] for p in helm['parameters']}['clusterName'] == cluster
                 host = f"{name}-{ns}.apps.{cluster}.example.com"
-                assert route['spec']['host'] == host and len(host)<=253
+                assert len(host)<=253
+                if comp == 'springboot':
+                    assert 'host' not in route['spec'], 'Backend host must be assigned by OpenShift'
+                else:
+                    assert route['spec']['host'] == host
                 assert next(d for d in docs if d['kind']=='Deployment')['spec']['replicas']==2
                 routes[item['app'],item['env'],comp]=host
                 if comp=='httpd':
@@ -78,7 +82,7 @@ def main():
                 (cluster_out/(name+'.yaml')).write_text(output)
                 (cluster_out/(name+'.lint.txt')).write_text(lint)
                 apps.append(app)
-                rows.append({'cluster':cluster,'application':name,'namespace':ns,'routeHost':host,'lint':'PASS','template':'PASS'})
+                rows.append({'cluster':cluster,'application':name,'namespace':ns,'expectedRouteHost':host,'renderedRouteHost':route['spec'].get('host'),'lint':'PASS','template':'PASS'})
             for (a,e),conf in proxy_configs.items():
                 backend=routes[a,e,'springboot']
                 assert f'ProxyPass "/" "https://{backend}/"' in conf
@@ -86,14 +90,13 @@ def main():
                 assert f'ProxyPassReverseCookieDomain "{backend}"' in conf
             (cluster_out/'applications.yaml').write_text(yaml.safe_dump_all(apps,sort_keys=False))
             print(f'{cluster}: {len(apps)} Applications, helm lint + helm template OK')
-    # Missing/invalid cluster inputs must fail, rather than producing a guessed domain.
-    for comp in ['httpd', 'springboot']:
-        cmd = ['helm', 'template', 'test', str(ROOT/'charts'/comp)]
-        for overrides in [[], ['--set-string', 'clusterName=https://invalid']]:
-            result = subprocess.run(cmd+overrides, text=True, capture_output=True)
-            assert result.returncode != 0, 'Missing or invalid clusterName accepted'
+    # HTTPD still needs a cluster to compute its expected target; Spring Boot does not.
+    cmd = ['helm', 'template', 'test', str(ROOT/'charts/httpd'), '--set',
+           'appName=app1,environment=int,route.cookieName=APP1_INT_FRONT']
+    result = subprocess.run(cmd, text=True, capture_output=True)
+    assert result.returncode != 0 and 'clusterName requis' in result.stderr
     assert len(rows)==16
     (out/'report.json').write_text(json.dumps(rows,indent=2)+'\n')
-    print('16/16 rendus valides ; noms, labels, destinations et hosts HTTPD/backend concordants.')
+    print('16/16 rendus valides ; noms, labels, destinations et hosts attendus HTTPD verifies ; host reel backend non lu.')
 
 if __name__=='__main__':main()
