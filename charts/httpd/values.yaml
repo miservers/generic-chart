@@ -1,8 +1,8 @@
 appName: monapp
 fullnameOverride: ''
 imagePullSecrets: []
-image: registry.access.redhat.com/ubi9/httpd-24:latest
-imagePullPolicy: IfNotPresent
+image: registry.access.redhat.com/hi/httpd:latest
+imagePullPolicy: Always
 replicas: 2
 port: 8080
 proxyTimeout: 60

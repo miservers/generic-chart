@@ -33,7 +33,7 @@ spec:
         - name: httpd
           image: {{ .Values.image | quote }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
-          command: [/usr/sbin/httpd]
+          command: [/usr/bin/httpd]
           args: [-f, /etc/custom-httpd/httpd.conf, -DFOREGROUND]
           ports:
             - {name: http, containerPort: {{ .Values.port }}, protocol: TCP}

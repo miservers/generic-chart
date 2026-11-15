@@ -74,7 +74,7 @@ L'annotation `haproxy.router.openshift.io/set-forwarded-headers` vaut `replace` 
 
 Les deux Routes utilisent une terminaison edge avec redirection HTTP → HTTPS. HTTPD vérifie le certificat du routeur backend : `SSLProxyVerify require`, nom DNS et expiration contrôlés. La résolution DNS de `backendRoute.host` doit pointer vers le routeur joignable depuis les pods HTTPD, et le certificat doit couvrir ce host.
 
-Par défaut, HTTPD utilise le bundle système UBI `/etc/pki/tls/certs/ca-bundle.crt`. Si le routeur utilise une CA privée, créer un Secret dans le **namespace frontend**, puis configurer :
+Par défaut, HTTPD utilise le bundle système Red Hat `/etc/pki/tls/certs/ca-bundle.crt`. Si le routeur utilise une CA privée, créer un Secret dans le **namespace frontend**, puis configurer :
 
 ```yaml
 backendRoute:
@@ -148,11 +148,27 @@ L'exemple AppDynamics cible INT et contient des placeholders. Prévoir des param
 
 Les listes Helm sont remplacées par les surcharges : conserver les variables nécessaires dans `env`. `SERVER_PORT` est généré depuis `port`. Les variables gérées et les noms de volumes réservés sont validés pour éviter les doublons.
 
+## Image HTTPD Red Hat durcie
+
+Le chart utilise `registry.access.redhat.com/hi/httpd:latest`, variante runtime, dans les trois environnements. Le tag `latest-builder` n'est pas utilisé. `imagePullPolicy: Always` permet de résoudre le tag mutable à chaque démarrage ; cela ne redémarre pas automatiquement les pods lorsqu'une nouvelle image est publiée. Pour des promotions reproductibles, remplacer `image` par un digest approuvé et choisir la politique de pull adaptée.
+
+Le Containerfile officiel utilise `ENTRYPOINT ["/usr/bin/httpd", "-DFOREGROUND"]`. Le chart lance directement `/usr/bin/httpd -f /etc/custom-httpd/httpd.conf -DFOREGROUND` : aucun shell, script de démarrage, `mkdir` ou `chown` n'est exécuté dans le conteneur. Il fournit une configuration complète dédiée ; les listeners et inclusions de la configuration par défaut de l'image ne sont donc pas chargés. Le seul listener de ce chart est 8080 ; `mod_ssl` sert à la connexion sortante HTTPS vers la Route backend.
+
+La racine reste en lecture seule ; `/run/httpd` et `/tmp` sont des `emptyDir` inscriptibles. Aucun UID fixe ni SCC anyuid n'est demandé. Les probes sont TCP et ne nécessitent aucun outil dans l'image. Les logs se consultent sans shell :
+
+```sh
+oc logs -n monapp-front-int deployment/monapp-int-httpd
+oc exec -n monapp-front-int deployment/monapp-int-httpd -- /usr/bin/httpd -t -f /etc/custom-httpd/httpd.conf
+oc exec -n monapp-front-int deployment/monapp-int-httpd -- /usr/bin/httpd -M -f /etc/custom-httpd/httpd.conf
+```
+
+`oc rsh` et `/bin/sh` ne sont pas requis et peuvent être absents de cette image distroless. Les chemins du binaire, le compte apache, la présence de mod_ssl et la disposition `/etc/httpd` ont été contrôlés dans les sources officielles Hummingbird. Le registre n'a pas fourni de manifeste exploitable dans l'environnement de travail : le digest et le démarrage de l'image publiée n'ont pas été vérifiés ici. Effectuer le test `httpd -t` et le rollout sur le cluster avant promotion.
+
 ## Probes, images et logs
 
 Spring Boot doit inclure Actuator et exposer les probes `/actuator/health/liveness` et `/actuator/health/readiness` au kubelet, sur le port applicatif, sans authentification. Adapter les chemins au context-path. Ne pas faire dépendre la liveness d'une base de données. La readiness gouverne les endpoints disponibles pour la Route backend.
 
-HTTPD utilise des probes TCP, qui ne garantissent pas la disponibilité de la Route backend. Les chemins et modules sont ceux d'UBI `httpd-24`, avec `/usr/sbin/httpd` et `mod_ssl`. Valider l'image approuvée avant promotion. Les logs Apache vont sur stdout/stderr ; l'image Spring Boot doit également prévoir ses logs console. Les images doivent accepter l'UID arbitraire OpenShift ; aucun UID/fsGroup n'est imposé. Le système de fichiers HTTPD est en lecture seule avec des volumes temporaires dédiés.
+HTTPD utilise des probes TCP, qui ne garantissent pas la disponibilité de la Route backend. Les chemins et modules sont ceux d'Red Hat Hardened Image `registry.access.redhat.com/hi/httpd:latest`, avec `/usr/bin/httpd` et `mod_ssl`. Valider l'image approuvée avant promotion. Les logs Apache vont sur stdout/stderr ; l'image Spring Boot doit également prévoir ses logs console. Les images doivent accepter l'UID arbitraire OpenShift ; aucun UID/fsGroup n'est imposé. Le système de fichiers HTTPD est en lecture seule avec des volumes temporaires dédiés.
 
 ## Migration depuis les versions précédentes
 
@@ -176,7 +192,7 @@ Depuis un poste connecté, valider chaque rendu avec `oc apply --dry-run=server 
 ```sh
 oc rollout status -n monapp-back-int deployment/monapp-int-springboot
 oc rollout status -n monapp-front-int deployment/monapp-int-httpd
-oc exec -n monapp-front-int deployment/monapp-int-httpd -- /usr/sbin/httpd -t -f /etc/custom-httpd/httpd.conf
+oc exec -n monapp-front-int deployment/monapp-int-httpd -- /usr/bin/httpd -t -f /etc/custom-httpd/httpd.conf
 curl -v -c cookies.txt -b cookies.txt https://monapp-int.apps.example.com/
 ```
 
@@ -188,7 +204,7 @@ Validation locale : lint et rendu INT/REC/PROD, deux réplicas, deux Deployments
 APACHE_BIN=/chemin/httpd APACHE_MODULES=/chemin/modules python3 tests/route_proxy_smoke.py
 ```
 
-Il contrôle Host/SNI, headers publics, transmission des cookies dans les deux sens, réécriture du Domain, redirection HTTPS et rejet d'un certificat au mauvais nom. Il adapte les chemins/modules locaux et **ne teste pas le routeur OpenShift, son affinité réelle, l'image UBI ou le réseau du cluster**. Aucun déploiement réel ni démarrage de l'agent AppDynamics n'a été effectué ici.
+Il contrôle Host/SNI, headers publics, transmission des cookies dans les deux sens, réécriture du Domain, redirection HTTPS et rejet d'un certificat au mauvais nom. Il adapte les chemins/modules locaux et **ne teste pas le routeur OpenShift, son affinité réelle, l'image Red Hat hi/httpd ou le réseau du cluster**. Aucun déploiement réel ni démarrage de l'agent AppDynamics n'a été effectué ici.
 
 ## Références officielles
 
@@ -201,3 +217,7 @@ Il contrôle Host/SNI, headers publics, transmission des cookies dans les deux s
 - [Spring Boot Actuator](https://docs.spring.io/spring-boot/reference/actuator/endpoints.html)
 - [AppDynamics : agent Java dans les conteneurs](https://docs.appdynamics.com/appd/onprem/24.x/24.6/en/application-monitoring/install-app-server-agents/java-agent/install-the-java-agent/install-the-java-agent-in-containers)
 - [Oracle truststore JSSE](https://docs.oracle.com/en/java/javase/25/security/java-secure-socket-extension-jsse-reference-guide.html)
+
+- [Red Hat : Containerfile de hi/httpd](https://gitlab.com/redhat/hummingbird/containers/-/blob/main/images/httpd/Containerfile.j2)
+- [Red Hat : packages et utilisateur de hi/httpd](https://gitlab.com/redhat/hummingbird/containers/-/blob/main/images/httpd/properties.yml)
+- [Red Hat : documentation HTTPD Hummingbird](https://gitlab.com/redhat/hummingbird/containers/-/blob/main/generated/images/httpd/hummingbird/README.md)

@@ -78,3 +78,15 @@ assert volume['secret']['items']==[{'key':'root.pem','path':'ca.crt'}]
 assert 'SSLProxyCACertificateFile /etc/backend-route-ca/ca.crt' in one(ca,'ConfigMap')['data']['httpd.conf']
 assert not any(d['kind']=='Route' for d in render('springboot',extra={'route':{'enabled':False}}))
 print('Routes frontend/backend, cookies distincts, TLS vérifié, CA montée, anciens paramètres rejetés: OK')
+
+for env in ('int','rec','prod'):
+ spec=one(render('httpd',env),'Deployment')['spec']['template']['spec']
+ c=spec['containers'][0]
+ assert c['image']=='registry.access.redhat.com/hi/httpd:latest'
+ assert c['command']==['/usr/bin/httpd']
+ assert c['args']==['-f','/etc/custom-httpd/httpd.conf','-DFOREGROUND']
+ assert c['securityContext']['readOnlyRootFilesystem'] is True
+ assert 'runAsUser' not in spec['securityContext']
+ for probe in ('startupProbe','readinessProbe','livenessProbe'):
+  assert 'tcpSocket' in c[probe] and 'exec' not in c[probe]
+print('Image Red Hat hi/httpd runtime, démarrage sans shell et probes TCP: OK')
