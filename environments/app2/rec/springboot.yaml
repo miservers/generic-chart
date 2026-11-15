@@ -1,0 +1,9 @@
+# Exemple : adapter domaines et images à votre plateforme.
+appName: app2
+replicas: 2
+image: registry.example.com/equipe/app2:1.0.0
+route:
+  host: app2-rec-app-app2-rec.apps-internal.example.com
+  cookieName: APP2_REC_BACK
+  labels:
+    ingress-scope: internal

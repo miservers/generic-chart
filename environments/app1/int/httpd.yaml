@@ -1,0 +1,8 @@
+# Exemple : adapter domaines et images à votre plateforme.
+appName: app1
+replicas: 2
+route:
+  host: app1-int-prez-app1-intfr.apps.example.com
+  cookieName: APP1_INT_FRONT
+backendRoute:
+  host: app1-int-app-app1-int.apps-internal.example.com

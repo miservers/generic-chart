@@ -105,6 +105,31 @@ oc get route -n monapp-back-int monapp-int-springboot -o yaml
 # Contrôler status.ingress : routerName, conditions Admitted et hostname.
 ```
 
+## ApplicationSet app1 / app2 — INT et REC
+
+`argocd/applicationsets/applications-metier.yaml` génère huit Applications pour un seul cluster sélectionné. Chaque application métier déclare `envs: [int, rec]` et `components: [httpd, springboot]`. `elementsYaml` développe ces tableaux, puis Matrix associe le cluster.
+
+| Application | Namespace |
+|---|---|
+| app1-int-app | app1-int |
+| app1-int-prez | app1-intfr |
+| app1-rec-app | app1-rec |
+| app1-rec-prez | app1-recfr |
+| app2-int-app | app2-int |
+| app2-int-prez | app2-intfr |
+| app2-rec-app | app2-rec |
+| app2-rec-prez | app2-recfr |
+
+Les huit fichiers `environments/{app1,app2}/{int,rec}/{httpd,springboot}.yaml` sont fournis. Leurs images et domaines `example.com` sont des exemples à adapter ; les hosts frontend/backend sont explicitement renseignés, conformément à la version actuelle des charts. L'ApplicationSet ne découvre pas le domaine Ingress. Les noms Helm de release suivent les noms des Applications (`-app` et `-prez`).
+
+Faire gérer le répertoire `argocd/applicationsets` par votre Application parente App of Apps, ou créer cet ApplicationSet depuis Argo CD. L'Application parente doit être autorisée à gérer ce type de ressource dans `openshift-gitops`. Le contrôleur ApplicationSet doit être installé et autorisé à traiter cet objet.
+
+Le Secret représentant **un seul cluster cible dans Argo CD** doit porter `deploy-applications-metier: "true"`. Aucun cluster sélectionné ne produit d'Application ; plusieurs clusters créeraient des noms en collision. Le cluster local doit également avoir un Secret de cluster pour cette sélection par label. Les namespaces doivent exister et être accessibles au contrôleur ; l'AppProject doit autoriser le dépôt et les destinations.
+
+La synchronisation des huit Applications est manuelle. Les anciens exemples individuels `monapp` sont conservés et indépendants ; ne pas les importer si vous ne voulez déployer que app1/app2. Pour une migration d'Applications existantes vers ApplicationSet, contrôler leurs noms et propriétaires avant activation.
+
+Références : [List / elementsYaml](https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/Generators-List/) et [Matrix](https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/Generators-Matrix/).
+
 ## Installation Argo CD
 
 1. Adapter les domaines, images et namespaces des fichiers d'environnement. Fixer les images par digest approuvé en production ; `latest` HTTPD reste une valeur illustrative.
