@@ -1,5 +1,13 @@
 # HTTPD + Spring Boot : deux charts et affinité par Route OpenShift
 
+## Activation de l’affinité de session
+
+Chaque chart accepte `session: enabled` (valeur par défaut) ou `session: disabled`, dans ses valeurs Helm ou les paramètres de son Application Argo CD. Le frontend et le backend sont configurables indépendamment.
+
+Avec `enabled`, la Route émet les annotations `disable_cookies: "false"` et `cookie_name` issu de `route.cookieName`. Avec `disabled`, elle émet uniquement `disable_cookies: "true"` pour l’affinité. Cela ne désactive pas le cookie Java `JSESSIONID`.
+
+Les templates de Route n’utilisent plus `route.annotations` : les éventuelles valeurs existantes de ce champ, notamment `set-forwarded-headers`, ne sont plus rendues. Les labels de Route restent pris en charge.
+
 Le même dépôt contient deux charts autonomes et deux Applications Argo CD par application métier et environnement.
 
 | Chart | Workload | Namespace INT | Responsabilité |

@@ -125,6 +125,13 @@
           }
         }
       }
+    },
+    "session": {
+      "type": "string",
+      "enum": [
+        "enabled",
+        "disabled"
+      ]
     }
   },
   "not": {

@@ -78,6 +78,13 @@
           "pattern": "^[A-Za-z0-9._-]+$"
         }
       }
+    },
+    "session": {
+      "type": "string",
+      "enum": [
+        "enabled",
+        "disabled"
+      ]
     }
   },
   "not": {

@@ -1,3 +1,5 @@
+# Affinite du routeur : enabled ou disabled (independante pour chaque chart).
+session: enabled
 appName: monapp
 fullnameOverride: ''
 imagePullSecrets: []

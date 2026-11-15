@@ -9,8 +9,12 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   annotations:
-    {{- $annotations := mergeOverwrite (deepCopy .Values.route.annotations) (dict "router.openshift.io/cookie_name" .Values.route.cookieName "haproxy.router.openshift.io/disable_cookies" "false") }}
-    {{- toYaml $annotations | nindent 4 }}
+    {{- if eq .Values.session "enabled" }}
+    router.openshift.io/cookie_name: {{ .Values.route.cookieName | quote }}
+    haproxy.router.openshift.io/disable_cookies: "false"
+    {{- else }}
+    haproxy.router.openshift.io/disable_cookies: "true"
+    {{- end }}
 spec:
   host: {{ required "route.host requis" .Values.route.host | quote }}
   to:
