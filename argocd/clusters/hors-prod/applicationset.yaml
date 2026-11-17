@@ -49,10 +49,13 @@ spec:
           parameters:
             - name: appName
               value: '{{ .app }}'
+              forceString: true
             - name: environment
               value: '{{ .env }}'
+              forceString: true
             - name: clusterName
               value: '{{ .clusterName }}'
+              forceString: true
             - name: replicas
               value: "2"
       destination:

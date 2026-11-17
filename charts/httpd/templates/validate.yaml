@@ -1,6 +1,26 @@
 {{- if and .Values.route.enabled (eq .Values.session "enabled") (not .Values.route.cookieName) -}}
 {{- fail "route.cookieName est requis lorsque route.enabled=true et session=enabled" -}}
 {{- end -}}
-{{- if eq (include "app.routeHost" .) (include "app.backendHost" .) -}}
+{{- if eq (include "httpd.routeHost" .) (include "httpd.backendHost" .) -}}
 {{- fail "Les hosts frontend et backend doivent être différents (boucle proxy)" -}}
+{{- end -}}
+
+{{- if .Values.networkPolicy.egress.enabled -}}
+{{- if not .Values.networkPolicy.enabled -}}
+{{- fail "networkPolicy.enabled doit etre true lorsque networkPolicy.egress.enabled=true" -}}
+{{- end -}}
+{{- if not .Values.networkPolicy.egress.dnsIPs -}}
+{{- fail "networkPolicy.egress.dnsIPs requis lorsque egress est active" -}}
+{{- end -}}
+{{- end -}}
+
+{{- range $host := list (include "httpd.routeHost" .) (include "httpd.backendHost" .) -}}
+{{- if gt (len $host) 253 -}}
+{{- fail "Hostname calcule trop long (253 caracteres maximum) : fournir un host explicite plus court" -}}
+{{- end -}}
+{{- range $label := splitList "." $host -}}
+{{- if gt (len $label) 63 -}}
+{{- fail "Segment du hostname calcule trop long (63 caracteres maximum) : fournir un host explicite plus court" -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}

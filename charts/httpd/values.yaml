@@ -3,7 +3,7 @@ session: enabled
 appName: ""  # Requis : fourni par l’Application ou les valeurs d’environnement.
 # Injectes par Application.spec.source.helm.parameters.
 clusterName: ""
-# Domaine fixe de l’organisation : remplacer cet exemple dans les deux charts.
+# Domaine fixe de l’organisation : configurer ici, indépendamment du cluster.
 baseDomain: example.com
 environment: ""
 fullnameOverride: ''
@@ -13,6 +13,17 @@ imagePullPolicy: Always
 replicas: 2
 port: 8080
 proxyTimeout: 60
+# Probes sans shell ; adapter si le service expose un endpoint de sante local.
+startupProbe:
+  tcpSocket: {port: http}
+  periodSeconds: 5
+  failureThreshold: 30
+readinessProbe:
+  tcpSocket: {port: http}
+  periodSeconds: 5
+livenessProbe:
+  tcpSocket: {port: http}
+  periodSeconds: 10
 resources:
   requests:
     cpu: 100m
@@ -25,8 +36,6 @@ route:
   host: ""
   cookieName: ""  # Requis si route.enabled et session=enabled.
   labels: {}
-  annotations:
-    haproxy.router.openshift.io/set-forwarded-headers: replace
 networkPolicy:
   enabled: true
   egress:

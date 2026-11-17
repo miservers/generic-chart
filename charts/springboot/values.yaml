@@ -3,12 +3,10 @@ session: enabled
 appName: ""  # Requis : fourni par l’Application ou les valeurs d’environnement.
 # Injectes par Application.spec.source.helm.parameters.
 clusterName: ""
-# Domaine fixe de l’organisation : remplacer cet exemple dans les deux charts.
-baseDomain: example.com
 environment: ""
 fullnameOverride: ''
 imagePullSecrets: []
-image: registry.example.com/equipe/monapp:1.0.0
+image: ""  # Requis : image Spring Boot de l’application.
 imagePullPolicy: IfNotPresent
 replicas: 2
 port: 8080
@@ -85,5 +83,3 @@ route:
   cookieName: ""  # Requis si route.enabled et session=enabled.
   labels:
     ingress-scope: internal
-  annotations:
-    haproxy.router.openshift.io/set-forwarded-headers: never

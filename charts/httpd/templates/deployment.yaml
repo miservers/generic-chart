@@ -1,8 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "app.name" . }}
+  name: {{ include "httpd.name" . }}
   namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "httpd.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicas }}
   revisionHistoryLimit: 3
@@ -11,15 +13,15 @@ spec:
     rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
   selector:
     matchLabels:
-      {{- include "app.selector" . | nindent 6 }}
+      {{- include "httpd.selector" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "app.selector" . | nindent 8 }}
+        {{- include "httpd.selector" . | nindent 8 }}
       annotations:
         checksum/httpd: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
-      serviceAccountName: {{ include "app.name" . }}
+      serviceAccountName: {{ include "httpd.name" . }}
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 30
       {{- with .Values.imagePullSecrets }}
@@ -44,15 +46,11 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           startupProbe:
-            tcpSocket: {port: http}
-            periodSeconds: 5
-            failureThreshold: 30
+            {{- toYaml .Values.startupProbe | nindent 12 }}
           readinessProbe:
-            tcpSocket: {port: http}
-            periodSeconds: 5
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
           livenessProbe:
-            tcpSocket: {port: http}
-            periodSeconds: 10
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
           volumeMounts:
             - {name: tmp, mountPath: /tmp}
             - {name: runtime, mountPath: /run/httpd}
@@ -67,7 +65,7 @@ spec:
           emptyDir: {}
         - name: config
           configMap:
-            name: {{ include "app.name" . }}
+            name: {{ include "httpd.name" . }}
         {{- if .Values.backendRoute.caSecretName }}
         - name: backend-route-ca
           secret:

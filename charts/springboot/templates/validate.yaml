@@ -17,3 +17,20 @@
 {{- end -}}
 {{- $_ := set $envNames .name true -}}
 {{- end -}}
+
+{{/* Les montages additionnels doivent referencer un volume et un chemin distincts. */}}
+{{- $paths := dict "/tmp" true -}}
+{{- if .Values.appdynamics.enabled -}}
+{{- $_ := set $paths "/opt/appdynamics" true -}}
+{{- end -}}
+{{- range .Values.certificates -}}
+{{- if hasKey $paths .mountPath -}}{{- fail "Chemin de montage de certificat duplique ou reserve" -}}{{- end -}}
+{{- $_ := set $paths .mountPath true -}}
+{{- end -}}
+{{- range .Values.extraVolumeMounts -}}
+{{- if or (not (hasKey $names .name)) (and (eq .name "appdynamics") (not $.Values.appdynamics.enabled)) -}}
+{{- fail "extraVolumeMounts reference un volume absent" -}}
+{{- end -}}
+{{- if hasKey $paths .mountPath -}}{{- fail "Chemin extraVolumeMounts duplique ou reserve" -}}{{- end -}}
+{{- $_ := set $paths .mountPath true -}}
+{{- end -}}

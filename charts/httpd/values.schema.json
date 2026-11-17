@@ -39,25 +39,17 @@
         "host": {
           "type": "string",
           "maxLength": 253,
-          "pattern": "^$|^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$"
+          "pattern": "^$|^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$"
         },
         "cookieName": {
           "type": "string",
           "pattern": "^$|^[A-Za-z_][A-Za-z0-9_]*$"
         },
         "labels": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "annotations": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
+          "$ref": "#/definitions/stringMap"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "backendRoute": {
       "type": "object",
@@ -65,7 +57,7 @@
         "host": {
           "type": "string",
           "maxLength": 253,
-          "pattern": "^$|^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$"
+          "pattern": "^$|^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$"
         },
         "caSecretName": {
           "type": "string",
@@ -75,7 +67,8 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9._-]+$"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "session": {
       "type": "string",
@@ -91,7 +84,7 @@
     "baseDomain": {
       "type": "string",
       "maxLength": 253,
-      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$",
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$",
       "minLength": 1
     },
     "clusterName": {
@@ -131,35 +124,201 @@
               "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
             },
             "routerPodSelector": {
-              "type": "object"
+              "$ref": "#/definitions/labelSelector"
             }
           },
-          "not": {
+          "additionalProperties": false
+        },
+        "routerNamespaceSelector": {
+          "$ref": "#/definitions/labelSelector"
+        }
+      },
+      "additionalProperties": false
+    },
+    "global": {
+      "type": "object",
+      "description": "Contexte global Helm transmis par un eventuel chart parent."
+    },
+    "imagePullPolicy": {
+      "type": "string",
+      "enum": [
+        "Always",
+        "IfNotPresent",
+        "Never"
+      ]
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 63,
+            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+          }
+        }
+      }
+    },
+    "resources": {
+      "$ref": "#/definitions/resources"
+    },
+    "startupProbe": {
+      "$ref": "#/definitions/probe"
+    },
+    "readinessProbe": {
+      "$ref": "#/definitions/probe"
+    },
+    "livenessProbe": {
+      "$ref": "#/definitions/probe"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "stringMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "labelSelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "matchLabels": {
+          "$ref": "#/definitions/stringMap"
+        },
+        "matchExpressions": {
+          "type": "array",
+          "items": {
+            "type": "object",
             "required": [
-              "backendRouteIPs"
+              "key",
+              "operator"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "operator": {
+                "type": "string",
+                "enum": [
+                  "In",
+                  "NotIn",
+                  "Exists",
+                  "DoesNotExist"
+                ]
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requests": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number"
+            ]
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number"
             ]
           }
         }
       }
+    },
+    "probe": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "httpGet": {
+          "type": "object"
+        },
+        "tcpSocket": {
+          "type": "object"
+        },
+        "exec": {
+          "type": "object"
+        },
+        "grpc": {
+          "type": "object"
+        },
+        "initialDelaySeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "periodSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "failureThreshold": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "successThreshold": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "httpGet"
+          ]
+        },
+        {
+          "required": [
+            "tcpSocket"
+          ]
+        },
+        {
+          "required": [
+            "exec"
+          ]
+        },
+        {
+          "required": [
+            "grpc"
+          ]
+        }
+      ]
     }
   },
-  "not": {
-    "anyOf": [
-      {
-        "required": [
-          "stickySession"
-        ]
-      },
-      {
-        "required": [
-          "backend"
-        ]
-      },
-      {
-        "required": [
-          "clusterDomain"
-        ]
-      }
-    ]
-  }
+  "required": [
+    "appName",
+    "image"
+  ]
 }

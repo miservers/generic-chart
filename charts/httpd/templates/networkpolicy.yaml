@@ -2,12 +2,14 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "app.name" . }}
+  name: {{ include "httpd.name" . }}
   namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "httpd.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "app.selector" . | nindent 6 }}
+      {{- include "httpd.selector" . | nindent 6 }}
   policyTypes:
     - Ingress
     {{- if .Values.networkPolicy.egress.enabled }}
@@ -21,22 +23,18 @@ spec:
       ports:
         - {protocol: TCP, port: {{ .Values.port }}}
   {{- if .Values.networkPolicy.egress.enabled }}
-  {{- if not .Values.networkPolicy.egress.dnsIPs }}
-  {{- fail "networkPolicy.egress.dnsIPs requis lorsque egress est active" }}
-  {{- end }}
-  {{- $dnsIPs := .Values.networkPolicy.egress.dnsIPs }}
   egress:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ required "networkPolicy.egress.routerNamespace requis" .Values.networkPolicy.egress.routerNamespace | quote }}
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.egress.routerNamespace | quote }}
           podSelector:
             {{- toYaml .Values.networkPolicy.egress.routerPodSelector | nindent 12 }}
       ports:
         - protocol: TCP
           port: 443
     - to:
-        {{- range $dnsIPs }}
+        {{- range .Values.networkPolicy.egress.dnsIPs }}
         - ipBlock:
             cidr: "{{ . }}/32"
         {{- end }}

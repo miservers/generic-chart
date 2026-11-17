@@ -1,0 +1,37 @@
+# Modele pour l’editeur YAML Argo CD ; adapter namespace source et AppProject.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app1-int-prez
+  namespace: gitops-metier
+  labels:
+    deployment.example.com/cluster: hors-prod
+spec:
+  project: applications-metier
+  source:
+    repoURL: https://github.com/miservers/generic-chart.git
+    targetRevision: main
+    path: charts/httpd
+    helm:
+      releaseName: app1-int-prez
+      valueFiles:
+      - ../../environments/network/hors-prod/int.yaml
+      - ../../environments/app1/int/httpd.yaml
+      parameters:
+      - name: appName
+        value: app1
+        forceString: true
+      - name: environment
+        value: int
+        forceString: true
+      - name: clusterName
+        value: hors-prod
+        forceString: true
+      - name: replicas
+        value: '2'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app1-intfr
+  syncPolicy:
+    syncOptions:
+    - FailOnSharedResource=true

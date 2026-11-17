@@ -2,7 +2,7 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: {{ include "app.name" . }}
+  name: {{ include "springboot.name" . }}
   namespace: {{ .Release.Namespace }}
   {{- with .Values.route.labels }}
   labels:
@@ -21,7 +21,7 @@ spec:
   {{- end }}
   to:
     kind: Service
-    name: {{ include "app.name" . }}
+    name: {{ include "springboot.name" . }}
     weight: 100
   port:
     targetPort: http
