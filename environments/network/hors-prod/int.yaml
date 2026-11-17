@@ -1,12 +1,9 @@
 # HTTPD : sorties pour hors-prod / int. Valeurs communes a app1 et app2.
-# Renseigner les IP reelles avant de mettre enabled a true.
+# Verifier le chemin vers les routeurs et renseigner le DNS avant activation.
 networkPolicy:
   egress:
     enabled: false
-    backendRouteIPs: []
-    # Exemple de syntaxe (IP fictives, ne pas activer telles quelles) :
-    # backendRouteIPs:
-    #   - "192.0.2.11"
-    #   - "192.0.2.12"
+    routerNamespace: openshift-ingress
+    routerPodSelector: {}
     dnsIPs: []
     dnsPort: 53

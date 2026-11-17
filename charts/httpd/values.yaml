@@ -31,8 +31,10 @@ networkPolicy:
   enabled: true
   egress:
     enabled: false
-    # IPv4 des VIP F5 jointes par HTTPD pour la Route backend, sans /32.
-    backendRouteIPs: []
+    # Namespace des pods routeurs, pas celui de l’operateur.
+    routerNamespace: openshift-ingress
+    # Vide : tous les pods du namespace sur TCP/443.
+    routerPodSelector: {}
     # IPv4 DNS et port tels que vus par la NetworkPolicy (a valider sur le cluster).
     dnsIPs: []
     dnsPort: 53

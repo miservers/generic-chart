@@ -15,15 +15,19 @@ def render(egress, ok=True):
 default=render({'enabled':False})
 assert default['spec']['policyTypes']==['Ingress'] and 'egress' not in default['spec']
 for port in [53,5353]:
-    spec=render({'enabled':True,'backendRouteIPs':['192.0.2.11','192.0.2.12'],'dnsIPs':['192.0.2.53'],'dnsPort':port})['spec']
+    spec=render({'enabled':True,'dnsIPs':['192.0.2.53'],'dnsPort':port})['spec']
     assert spec['ingress']==default['spec']['ingress']
     assert spec['policyTypes']==['Ingress','Egress']
     https,dns=spec['egress']
-    assert https['to']==[{'ipBlock':{'cidr':ip+'/32'}} for ip in ['192.0.2.11','192.0.2.12']]
+    assert https['to']==[{'namespaceSelector':{'matchLabels':{'kubernetes.io/metadata.name':'openshift-ingress'}},'podSelector':{}}]
     assert https['ports']==[{'protocol':'TCP','port':443}]
     assert dns['to']==[{'ipBlock':{'cidr':'192.0.2.53/32'}}]
     assert dns['ports']==[{'protocol':proto,'port':port} for proto in ['UDP','TCP']]
 render({'enabled':True},ok=False)
-render({'enabled':True,'backendRouteIPs':['192.0.2.11']},ok=False)
-render({'enabled':True,'backendRouteIPs':['999.0.0.1'],'dnsIPs':['192.0.2.53']},ok=False)
-print('Egress HTTPD: activation, deux IP /32, DNS TCP/UDP 53 et 5353, ingress conserve et erreurs de configuration OK')
+render({'enabled':True,'routerNamespace':'','dnsIPs':['192.0.2.53']},ok=False)
+render({'enabled':True,'backendRouteIPs':['192.0.2.11'],'dnsIPs':['192.0.2.53']},ok=False)
+selector={'matchLabels':{'ingresscontroller.operator.openshift.io/deployment-ingresscontroller':'default'}}
+spec=render({'enabled':True,'routerNamespace':'custom-ingress','routerPodSelector':selector,'dnsIPs':['192.0.2.53']})['spec']
+assert spec['egress'][0]['to']==[{'namespaceSelector':{'matchLabels':{'kubernetes.io/metadata.name':'custom-ingress'}},'podSelector':selector}]
+assert spec['ingress']==default['spec']['ingress']
+print('Egress HTTPD: namespace/pods combines, TCP/443, DNS TCP/UDP, ingress conserve et anciennes IP refusees OK')

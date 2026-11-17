@@ -114,9 +114,31 @@ Le chart HTTPD propose un filtrage Egress optionnel, desactive par defaut. Les v
 
 Les ApplicationSets chargent ce fichier avant les valeurs de l’application ; une surcharge specifique reste donc possible. Le fichier est egalement charge pour Spring Boot mais ses champs `networkPolicy.egress` n’y sont pas utilises : le chart backend reste inchange.
 
-Le trajet est HTTPD → VIP F5:443 → routeur OpenShift → Spring Boot. Renseigner `networkPolicy.egress.backendRouteIPs` avec les IPv4 des VIP F5 reelles atteintes via le hostname de la Route backend, puis `dnsIPs` et `dnsPort` selon le chemin DNS du cluster, et activer `egress.enabled`. Les adresses n’incluent pas `/32` : le template l’ajoute. Cette version attend des IPv4 uniquement. Le port DNS par defaut est 53 ; un chemin vers les pods DNS OpenShift peut necessiter 5353. Les IP de Service, la traduction d’adresses et les routeurs hostNetwork doivent etre valides avec l’equipe plateforme.
+L’Egress HTTPD utilise maintenant un selecteur de namespace et de pods pour TCP/443, sans liste d’IP backend :
 
-Quand active, HTTPD autorise TCP/443 vers les VIP F5 de la Route backend et UDP/TCP vers les IP/port DNS. Les autres nouvelles connexions sortantes sont isolees sauf si une autre NetworkPolicy les autorise ; les politiques de plateforme peuvent aussi imposer leurs restrictions. La policy ne filtre pas les hostnames HTTP : toutes les Routes accessibles via les IP autorisees restent potentiellement joignables. HTTPD conserve le hostname dans ProxyPass pour Host/SNI/TLS. L’activation avec une liste de VIP backend ou DNS vide est refusee au rendu Helm.
+```yaml
+networkPolicy:
+  egress:
+    enabled: false
+    routerNamespace: openshift-ingress
+    routerPodSelector: {}
+    dnsIPs: []
+    dnsPort: 53
+```
+
+`openshift-ingress` contient les pods routeurs ; `openshift-ingress-operator` contient l’operateur. `default` est habituellement le nom d’un IngressController, pas le namespace cible. Le selecteur vide autorise tous les pods du namespace sur TCP/443. Pour limiter a un controleur dont les labels sont confirmes, utiliser :
+
+```yaml
+routerPodSelector:
+  matchLabels:
+    ingresscontroller.operator.openshift.io/deployment-ingresscontroller: default
+```
+
+Ne pas selectionner `default` si la Route backend est admise par un autre controleur. Namespace et pods sont dans le meme element `to` : les deux conditions sont combinees par ET. Les quatre fichiers de valeurs reseau conservent l’activation desactivee ; renseigner `dnsIPs` et verifier le chemin reseau avant activation. Les anciennes valeurs `backendRouteIPs` sont refusees par le schema HTTPD pour eviter leur utilisation silencieuse. Les DNS restent en IPv4 /32 avec UDP et TCP, port 53 par defaut, a adapter (par exemple 5353 si les pods DNS sont la destination effectivement filtree).
+
+**Cette NetworkPolicy ne change pas le chemin reseau ni la resolution DNS.** HTTPD conserve le hostname de la Route pour Host/SNI/TLS et l’affinite par cookie reste geree par le routeur. Dans cette plateforme, le hostname pointe vers une IP de Service LoadBalancer exposee par MetalLB : HTTPD → IP MetalLB → Service du routeur → pods routeurs → backend. MetalLB fournit l’exposition du Service ; le routeur traite les Routes et les cookies. Le selecteur de namespace doit reconnaitre la destination effective apres traduction d’adresse ; il ne selectionne pas l’IP MetalLB elle-meme. Selon le CNI, le NAT et le mode `hostNetwork` des routeurs, le selecteur peut ne pas reconnaitre le trafic ; aucune garantie de fonctionnement sur le cluster n’est donnee avant un essai reel. Les policies sont additives et peuvent autoriser d’autres sorties si d’autres regles existent.
+
+References : [NetworkPolicy, NAT et hostNetwork](https://kubernetes.io/docs/concepts/services-networking/network-policies/) et [Ingress Operator OpenShift](https://docs.redhat.com/en/documentation/openshift_container_platform/4.18/html/ingress_and_load_balancing/configuring-ingress-cluster-traffic).
 
 Les sorties Spring Boot ne sont pas filtrees par ces nouveaux parametres. Les regles Ingress existantes restent inchangees.
 

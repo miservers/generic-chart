@@ -21,20 +21,17 @@ spec:
       ports:
         - {protocol: TCP, port: {{ .Values.port }}}
   {{- if .Values.networkPolicy.egress.enabled }}
-  {{- if not .Values.networkPolicy.egress.backendRouteIPs }}
-  {{- fail "networkPolicy.egress.backendRouteIPs requis lorsque egress est active" }}
-  {{- end }}
-  {{- $backendRouteIPs := .Values.networkPolicy.egress.backendRouteIPs }}
   {{- if not .Values.networkPolicy.egress.dnsIPs }}
   {{- fail "networkPolicy.egress.dnsIPs requis lorsque egress est active" }}
   {{- end }}
   {{- $dnsIPs := .Values.networkPolicy.egress.dnsIPs }}
   egress:
     - to:
-        {{- range $backendRouteIPs }}
-        - ipBlock:
-            cidr: "{{ . }}/32"
-        {{- end }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ required "networkPolicy.egress.routerNamespace requis" .Values.networkPolicy.egress.routerNamespace | quote }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.egress.routerPodSelector | nindent 12 }}
       ports:
         - protocol: TCP
           port: 443
